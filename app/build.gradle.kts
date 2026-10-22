@@ -46,6 +46,7 @@ dependencies {
     implementation(libs.lifecycle.process)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.litertlm)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
 }

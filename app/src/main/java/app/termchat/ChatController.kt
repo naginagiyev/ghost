@@ -186,7 +186,25 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     fun onModelPicked(uri: Uri) {
         if (refuseWhileBusy()) return
-        viewModelScope.launch { app.importModel(uri) }
+        _state.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            try {
+                engine.unload()
+                engine.state.first { it == EngineState.Unloaded }
+                addLine(SysLine(Tag.PENDING, "importing model 0%", key = "import"))
+                val result = app.modelStore.import(uri) { percent ->
+                    addLine(SysLine(Tag.PENDING, "importing model $percent%", key = "import"))
+                }
+                val size = result.file.length() shr 20
+                addLine(SysLine(Tag.OK, "imported ${result.file.name}, $size MB", key = "import"))
+                addLine(SysLine(Tag.DIM, "sha256 ${result.sha256}"))
+            } catch (e: Exception) {
+                addLine(SysLine(Tag.FAIL, "import failed: ${e.message}", key = "import"))
+            } finally {
+                _state.update { it.copy(busy = false) }
+                engine.load()
+            }
+        }
     }
 
     private suspend fun openChat(id: Long, keepLines: Boolean) {
@@ -320,7 +338,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             addLine(SysLine(Tag.FAIL, "model not loaded, message kept", key = "wait"))
             return false
         }
-        addLine(SysLine(Tag.OK, "model ready, sending", key = "wait"))
+        addLine(SysLine(Tag.OK, "waiting for model", key = "wait"))
         return true
     }
 

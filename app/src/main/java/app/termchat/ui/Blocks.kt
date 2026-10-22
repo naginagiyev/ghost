@@ -25,7 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import app.termchat.AssistantItem
 import app.termchat.EchoItem
 import app.termchat.SystemItem
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 private val finishedBlocks = LruCache<String, List<MdBlock>>(256)
 private val blockGap = Arrangement.spacedBy(6.dp)
+private val labelColumn = Regex("^\\S+ {2,}")
 
 @Composable
 fun SystemLine(item: SystemItem, gapAbove: Boolean) {
@@ -50,9 +53,11 @@ fun SystemLine(item: SystemItem, gapAbove: Boolean) {
         Tag.INFO, Tag.WARN, Tag.FAIL -> Palette.text
         else -> Palette.dim
     }
+    val hang = labelColumn.find(item.text)?.value?.length ?: 0
+    val textStyle = BodyStyle.copy(color = textColor, textIndent = TextIndent(restLine = (hang * 0.6).em))
     Row(Modifier.padding(top = if (gapAbove) Spacing.block else 0.dp)) {
         if (label.isNotEmpty()) BasicText(label, style = BodyStyle.copy(color = color))
-        BasicText(item.text, Modifier.weight(1f, fill = false), style = BodyStyle.copy(color = textColor))
+        BasicText(item.text, Modifier.weight(1f, fill = false), style = textStyle)
         if (item.tag == Tag.PENDING) {
             BasicText(" ", style = BodyStyle)
             Spinner(BodyStyle.copy(color = Palette.dim))

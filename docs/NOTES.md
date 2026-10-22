@@ -28,7 +28,9 @@ Answers to plan Section 13, checked on 2026-10-22 against the official docs, the
 
 - `engine.createConversation(ConversationConfig(systemInstruction, initialMessages, tools, samplerConfig, automaticToolCalling, channels, extraContext, loraConfig, prefillPrefaceOnInit, maxOutputToken, thinkingConfig, enableResponseFormat, enableSpeculativeDecoding, chatTemplate))`.
 - Stream: `conversation.sendMessageAsync(contents): Flow<Message>` (also a callback form).
-- Cancel: `conversation.cancelProcess()` stops native generation.
+- Cancel: `conversation.cancelProcess()` stops native generation. Confirmed: the stream flow then ends with a `CancellationException` within about 1 s. The app treats it as a stop when it asked for one.
+- Each `Message` in the stream holds only the new text (a delta), not the full answer so far.
+- After a stop the conversation is closed and rebuilt from the database on the next message.
 - Sampling: `SamplerConfig(topK, topP, temperature, seed)`.
 - Initial history: `initialMessages = listOf(Message.user(...), Message.model(...))`. This is how a chat is restored after reload.
 - `maxOutputToken` per conversation is used for `Config.MAX_NEW_TOKENS`.
@@ -44,7 +46,7 @@ Answers to plan Section 13, checked on 2026-10-22 against the official docs, the
 ## 5. Token counts
 
 - `conversation.getTokenCount()` returns the exact number of tokens in the conversation so far.
-- `conversation.getBenchmarkInfo()` returns init time, time to first token, last prefill and decode token counts, and prefill and decode tokens/sec. Requires `ExperimentalFlags.enableBenchmark = true` before init.
+- `conversation.getBenchmarkInfo()` returns init time, time to first token, last prefill and decode token counts, and prefill and decode tokens/sec. Works with `ExperimentalFlags.enableBenchmark = true` (`@ExperimentalApi`), set before the engine is created.
 - No standalone tokenizer API. `ContextBuilder` uses `ceil(chars / 3.5)` for history that is not yet in the KV cache, and the status line uses the exact count from the conversation.
 
 ## 6. Thinking mode
@@ -57,7 +59,8 @@ Answers to plan Section 13, checked on 2026-10-22 against the official docs, the
 
 - Poco F3, Snapdragon 870 (SM8250), Adreno 650 with `libOpenCL.so` in `/vendor/lib64`. CPU and GPU are candidates.
 - NPU: not available. LiteRT-LM NPU models are compiled per chip (Qualcomm QCS8275, Google Tensor G5/G6). There is no build for SM8250. Out of scope for v1.
-- The model header and real load results on this phone are recorded in `BASELINE.md` (Phase 2).
+- Confirmed on the phone: the model header lists CPU and GPU for text, vision is present, max context 32003. GPU loads through OpenCL (Loaded OpenCL library with dlopen). NPU registry reports not found.
+- GPU is faster here: prefill 459 vs 147 tok/s, decode 19.6 vs 14.9 tok/s. Numbers in `BASELINE.md`.
 
 ## 8. Sampling
 
