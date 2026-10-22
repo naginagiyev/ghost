@@ -72,3 +72,11 @@ Lifecycle checks (all passed on the phone):
 - `/unload` then a message: `waiting for model`, reload, answer.
 - Crash flag set by hand (`loading_in_progress=gpu`): next launch prints `[warn] last load on gpu crashed`, uses CPU. `/calibrate` restores GPU.
 - MIUI compacts a backgrounded process within seconds (PSS drops before our unload) because the model is memory-mapped.
+
+## Phase 3: persistence and context
+
+- 3 chats survive `am force-stop` and relaunch with all messages (titles, counts, order by last update).
+- Opening an old chat and sending a message replays it from the database: `context restored in 1.3s` (2 earlier messages).
+- Long chat: 6 messages of about 3,000 characters each. At message 5 the rebuild left out the 4 oldest messages (`[warn] context full`), live context went from 2.7k to 2.1k tokens, and the chat kept answering.
+- Gemma's tokenizer gives about 4.6 characters per token on plain English, so the `chars / 3.5` estimate is on the safe side.
+- `/delete` and chat-list long-press both ask `rm "title"? [y/N]` and delete only on `y`.
