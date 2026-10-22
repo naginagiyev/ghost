@@ -16,7 +16,7 @@ data class ModelCheck(val textBackends: List<String>, val vision: Boolean, val m
 data class ImportResult(val file: File, val sha256: String)
 
 class ModelStore(private val context: Context) {
-    val dir = File(context.filesDir, "models")
+    private val dir by lazy { File(context.filesDir, "models") }
 
     fun find(): File? = dir.listFiles { file -> file.isFile && file.name.endsWith(MODEL_SUFFIX) }
         ?.maxByOrNull { it.lastModified() }

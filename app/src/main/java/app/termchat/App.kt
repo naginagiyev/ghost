@@ -1,6 +1,8 @@
 package app.termchat
 
 import android.app.Application
+import android.os.Build
+import android.os.PowerManager
 import android.os.StrictMode
 import app.termchat.data.Db
 import app.termchat.data.ImageStore
@@ -36,6 +38,11 @@ class App : Application() {
         modelStore = ModelStore(this)
         engine = LiteRtEngine(this, modelStore, Backends(this))
         modelLifecycle = ModelLifecycle(engine, scope).also { it.attach() }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getSystemService(PowerManager::class.java).addThermalStatusListener(mainExecutor) { status ->
+                engine.setThrottled(status >= PowerManager.THERMAL_STATUS_SEVERE)
+            }
+        }
     }
 
     override fun onTrimMemory(level: Int) {

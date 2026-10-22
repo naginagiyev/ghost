@@ -6,7 +6,7 @@ import com.google.ai.edge.litertlm.Backend
 import java.io.File
 
 class Backends(context: Context) {
-    private val prefs = context.getSharedPreferences("engine", Context.MODE_PRIVATE)
+    private val prefs by lazy { context.getSharedPreferences("engine", Context.MODE_PRIVATE) }
 
     fun create(name: String): Backend = if (name == GPU) Backend.GPU() else Backend.CPU()
 

@@ -26,10 +26,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import app.termchat.ui.ChatsScreen
 import app.termchat.ui.Palette
 import app.termchat.ui.TerminalScreen
 import java.io.File
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val controller: ChatController by viewModels()
@@ -40,7 +44,11 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         super.onCreate(savedInstanceState)
-        controller.state
+        lifecycleScope.launch {
+            controller.state.map { it.busy }.distinctUntilChanged().collect { busy ->
+                window.attributes = window.attributes.apply { preferredRefreshRate = if (busy) BUSY_REFRESH_RATE else 0f }
+            }
+        }
         if (savedInstanceState == null) handleDebugPrompt(intent)
         setContent { Root(controller, ::copyToClipboard) }
     }
@@ -62,6 +70,10 @@ class MainActivity : ComponentActivity() {
     private fun copyToClipboard(text: String) {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("termchat", text))
         controller.copied()
+    }
+
+    private companion object {
+        const val BUSY_REFRESH_RATE = 60f
     }
 }
 

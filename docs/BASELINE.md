@@ -97,3 +97,31 @@ GPU vision is used (`Config.VISION_BACKEND = "gpu"`, CPU only when GPU is marked
 - Answers referenced the real content: shopping list page (code 7342, item 2 Bananas) and a drawn scene (red house, brown roof, yellow sun, green field).
 - Replay after `/unload`: a follow-up text question about the picture restored the image from history (537 prefill tokens) and answered correctly.
 - Real Photo Picker (`com.google.android.photopicker`) works with no storage permission.
+
+## Phase 5: release build (R8, debuggable=false, signed with the debug key)
+
+Section 9 budget, measured on the release build.
+
+| Metric | Result | Target |
+|---|---|---|
+| Cold start to interactive UI (`am start -W`, 5 runs) | median 238 ms (215 to 401) | under 1 s: met |
+| Model load, GPU (compile cache warm) | 3.1 to 3.7 s | record |
+| Model load, GPU first ever / CPU | 10.2 s / 0.6 to 5.1 s | record |
+| Time to first token, GPU (`/bench`, 343-token prefill) | 0.79 s | record |
+| Prefill / decode, GPU | 463 / 19.0 tok/s | record |
+| Prefill / decode, CPU (debug build, same engine code) | 147 / 14.9 tok/s, TTFT 2.40 s | record |
+| Footer speed in real chats (tokens / total time) | 17 to 19 tok/s for 140-token answers | record |
+| UI jank while streaming text, 120 Hz screen | 0.0 to 1.4% janky, p99 14 to 17 ms (3 runs) | under 5%: met |
+| UI publish rate while streaming | about 12 to 19 per second (follows token rate, capped at 30) | at most 30: met |
+| PSS: loaded idle / generating / with image | 1.89 GB / 1.91 GB / 2.53 to 2.59 GB | record |
+| PSS after unload (background) / empty app | 137 MB / 91 MB | near baseline: met |
+| Thermal, 24 `/bench` runs in 5 min | status `none` the whole time, decode stayed 19.0 to 19.1 tok/s | no crash: met |
+| Battery | 80.6 s app CPU time in the 5-minute bench session | gap: this ROM's power profile reports 0 mAh for every app, and GPU time is not attributed |
+
+Changes made in this phase because of measurements:
+
+- Jank while streaming was 5.5 to 8.3% on the 120 Hz screen, because the model decodes on the same GPU that draws the UI. The app now asks for 60 Hz (`preferredRefreshRate`) while a message is in progress, which brought it to 0 to 1.4% and also saves power.
+- Startup did about 100 ms of disk reads on the main thread (`filesDir`, SharedPreferences, LiteRT native library). These now happen lazily or on the engine thread. The only remaining StrictMode hit is MIUI's own font fallback code during the first frame.
+- R8 broke generation: native code calls `SamplerConfig.getTopK()` by name through JNI, and the release build aborted with `JNI DETECTED ERROR ... mid == null`. Fixed with `-keep class com.google.ai.edge.litertlm.** { *; }`.
+- Thermal listener added: at `THERMAL_STATUS_SEVERE` or worse, answers are capped at 256 tokens and a `[warn] thermal throttling` line is shown. Not triggered on this phone in 5 minutes of continuous benchmarking.
+- Baseline Profile and ADPF were skipped: cold start is already 4x under budget, and decode speed did not drop under sustained load.

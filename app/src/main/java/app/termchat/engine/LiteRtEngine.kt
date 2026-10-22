@@ -23,6 +23,7 @@ import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
 import kotlin.math.ceil
@@ -63,8 +65,10 @@ class LiteRtEngine(
     @Volatile private var maxNewTokens = Config.MAX_NEW_TOKENS
 
     init {
-        ExperimentalFlags.enableBenchmark = true
-        Engine.setNativeMinLogSeverity(if (BuildConfig.DEBUG) LogSeverity.WARNING else LogSeverity.ERROR)
+        scope.launch {
+            ExperimentalFlags.enableBenchmark = true
+            Engine.setNativeMinLogSeverity(if (BuildConfig.DEBUG) LogSeverity.WARNING else LogSeverity.ERROR)
+        }
     }
 
     override fun load() {
@@ -200,12 +204,12 @@ class LiteRtEngine(
         }
     }
 
-    override suspend fun stats(): List<String> {
+    override suspend fun stats(): List<String> = withContext(Dispatchers.IO) {
         val memory = memoryInfo()
         val file = modelStore.find()
         val pss = Debug.getPss() shr 10
         val tokens = runCatching { conversation?.getTokenCount() }.getOrNull()
-        return listOf(
+        listOf(
             "device     ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}, ${Build.SUPPORTED_ABIS[0]}",
             "memory     ${memory.totalMem shr 20} MB total, ${memory.availMem shr 20} MB free, app pss $pss MB",
             "model      ${file?.name ?: "none"} ${file?.let { "(${it.length() shr 20} MB)" } ?: ""}",

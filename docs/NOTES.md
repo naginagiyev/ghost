@@ -77,7 +77,7 @@ Model card: `temperature=1.0`, `top_p=0.95`, `top_k=64` for all use cases. Same 
 
 ## 10. R8 and packaging
 
-- The AAR has no consumer ProGuard rules, and the docs list none. Tested on the release build in Phase 5.
+- The AAR has no consumer ProGuard rules, and the docs list none. Tested in Phase 5: the release build crashed (`NoSuchMethodError: SamplerConfig.getTopK()` called from JNI). The app keeps the whole package: `-keep class com.google.ai.edge.litertlm.** { *; }` in `app/proguard-rules.pro`. This is a difference from the plan, which said to add rules only if the docs list them.
 - Native libraries: default AGP packaging (uncompressed, page-aligned). No extra options needed.
 
 ## Differences from the plan

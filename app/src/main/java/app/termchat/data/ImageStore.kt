@@ -22,7 +22,7 @@ data class ImageInfo(val path: String, val width: Int, val height: Int, val byte
 }
 
 class ImageStore(private val context: Context) {
-    private val dir = File(context.filesDir, "images")
+    private val dir by lazy { File(context.filesDir, "images") }
     private val thumbnails = object : LruCache<String, Bitmap>(THUMBNAIL_CACHE_BYTES) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
