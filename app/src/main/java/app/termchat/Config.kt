@@ -11,6 +11,7 @@ object Config {
     const val STREAM_UI_INTERVAL_MS = 33L
     const val IMAGE_MAX_SIDE = 512
     const val IMAGE_TOKEN_COST = 280
+    const val VISION_BACKEND = "gpu"
     const val TEMPERATURE = 1.0
     const val TOP_K = 64
     const val TOP_P = 0.95

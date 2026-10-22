@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import app.termchat.ui.ChatsScreen
 import app.termchat.ui.Palette
 import app.termchat.ui.TerminalScreen
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val controller: ChatController by viewModels()
@@ -51,8 +53,10 @@ class MainActivity : ComponentActivity() {
     private fun handleDebugPrompt(intent: Intent) {
         if (!BuildConfig.DEBUG) return
         val prompt = intent.getStringExtra("prompt") ?: return
+        val image = intent.getStringExtra("image")
         intent.removeExtra("prompt")
-        controller.submit(prompt)
+        intent.removeExtra("image")
+        if (image != null) controller.onImagePicked(Uri.fromFile(File(image)), prompt) else controller.submit(prompt)
     }
 
     private fun copyToClipboard(text: String) {

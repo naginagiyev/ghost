@@ -147,6 +147,9 @@ class LiteRtEngine(
                 }
                 val end = SystemClock.elapsedRealtime()
                 val bench = runCatching { live.getBenchmarkInfo() }.getOrNull()
+                if (BuildConfig.DEBUG && bench != null) {
+                    Log.d(TAG, "turn prefill=${bench.lastPrefillTokenCount} tok in %.2fs, image=${request.prompt.imagePath != null}".format(bench.timeToFirstTokenInSecond))
+                }
                 val tokens = bench?.lastDecodeTokenCount?.takeIf { it > 0 } ?: chunks
                 val ttft = if (firstAt > 0) firstAt - start else end - start
                 val decodeSeconds = (end - (if (firstAt > 0) firstAt else start)).coerceAtLeast(1) / 1000.0
@@ -277,6 +280,7 @@ class LiteRtEngine(
             val config = EngineConfig(
                 modelPath = file.absolutePath,
                 backend = backends.create(name),
+                visionBackend = backends.create(if (backends.isBad(Backends.GPU)) Backends.CPU else Config.VISION_BACKEND),
                 maxNumTokens = Config.CONTEXT_TOKENS,
                 cacheDir = context.cacheDir.absolutePath,
             )

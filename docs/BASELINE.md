@@ -80,3 +80,20 @@ Lifecycle checks (all passed on the phone):
 - Long chat: 6 messages of about 3,000 characters each. At message 5 the rebuild left out the 4 oldest messages (`[warn] context full`), live context went from 2.7k to 2.1k tokens, and the chat kept answering.
 - Gemma's tokenizer gives about 4.6 characters per token on plain English, so the `chars / 3.5` estimate is on the safe side.
 - `/delete` and chat-list long-press both ask `rm "title"? [y/N]` and delete only on `y`.
+
+## Phase 4: images (GPU text backend)
+
+| Metric | GPU vision | CPU vision |
+|---|---|---|
+| Whole image turn (send to last token, short answer) | 7.6 to 8.2 s | 12.1 s |
+| PSS peak during image turn | 2.59 GB | 2.93 GB |
+| PSS after the turn (vision encoder stays loaded) | 2.55 GB | 2.93 GB |
+| UI during the turn | one 1.4 s frame stall on first use | 56% janky frames (all cores busy) |
+
+GPU vision is used (`Config.VISION_BACKEND = "gpu"`, CPU only when GPU is marked bad).
+
+- Image token cost: the turn prefill was 477 to 486 tokens versus about 210 for the system prompt plus a short text question, so one image costs about 270 tokens. This matches the Gemma 4 default budget of 280. `IMAGE_TOKEN_COST` stays 280.
+- The vision encoder resizes to its own token budget, so `IMAGE_MAX_SIDE` changes legibility, not token cost. At 512 px a 1600x1200 page with 44 pt text was read correctly (door code and list item). 512 is kept: files are 6 to 12 KB.
+- Answers referenced the real content: shopping list page (code 7342, item 2 Bananas) and a drawn scene (red house, brown roof, yellow sun, green field).
+- Replay after `/unload`: a follow-up text question about the picture restored the image from history (537 prefill tokens) and answered correctly.
+- Real Photo Picker (`com.google.android.photopicker`) works with no storage permission.

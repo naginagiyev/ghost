@@ -173,11 +173,12 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     suspend fun thumbnail(path: String) = app.imageStore.thumbnail(path, THUMBNAIL_SIDE)
 
-    fun onImagePicked(uri: Uri) {
+    fun onImagePicked(uri: Uri, thenSend: String? = null) {
         viewModelScope.launch {
             try {
                 val info = app.imageStore.save(uri)
                 _state.update { it.copy(attachment = info) }
+                thenSend?.let { submit(it) }
             } catch (e: Exception) {
                 addLine(SysLine(Tag.FAIL, "could not read image: ${e.message}"))
             }

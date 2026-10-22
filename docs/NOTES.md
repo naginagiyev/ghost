@@ -41,7 +41,8 @@ Answers to plan Section 13, checked on 2026-10-22 against the official docs, the
 
 - `Content.ImageFile(absolutePath)` or `Content.ImageBytes(bytes)`, combined with text in `Contents.of(...)`.
 - Gemma 4 image token budgets: 70, 140, 280, 560, 1120 (model card). LiteRT-LM exposes `ExperimentalFlags.visualTokenBudget`. Low budgets suit captioning, high budgets suit OCR.
-- Real cost on this phone is measured in Phase 4 and stored as `Config.IMAGE_TOKEN_COST`.
+- Measured on this phone: about 270 tokens per image with the default budget. `Config.IMAGE_TOKEN_COST = 280`.
+- `EngineConfig.visionBackend` is separate from the text backend. GPU vision works on Adreno 650 and is faster and lighter than CPU vision here. The vision encoder loads on the first image (about +650 MB PSS) and stays loaded until unload.
 
 ## 5. Token counts
 
