@@ -106,17 +106,23 @@ private fun ConfirmRow(title: String, onYes: () -> Unit, onNo: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        BasicText("[", style = BodyStyle.copy(color = Palette.dim))
         BasicText(
-            "[y",
-            Modifier.clickable(interactionSource = null, indication = null, onClick = onYes),
+            "y",
+            Modifier
+                .clickable(interactionSource = null, indication = null, onClick = onYes)
+                .padding(horizontal = 12.dp),
             style = BodyStyle.copy(color = Palette.error),
         )
         BasicText("/", style = BodyStyle.copy(color = Palette.dim))
         BasicText(
-            "N]",
-            Modifier.clickable(interactionSource = null, indication = null, onClick = onNo),
+            "N",
+            Modifier
+                .clickable(interactionSource = null, indication = null, onClick = onNo)
+                .padding(horizontal = 12.dp),
             style = BodyStyle.copy(color = Palette.text),
         )
+        BasicText("]", style = BodyStyle.copy(color = Palette.dim))
     }
 }
 

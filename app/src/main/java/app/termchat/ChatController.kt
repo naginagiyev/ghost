@@ -165,7 +165,11 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clearAttachment() = _state.update { it.copy(attachment = null) }
+    fun clearAttachment() {
+        val old = _state.value.attachment ?: return
+        _state.update { it.copy(attachment = null) }
+        viewModelScope.launch { app.imageStore.delete(old.path) }
+    }
 
     fun pickImage() {
         effectChannel.trySend(Effect.PickImage)
@@ -177,7 +181,9 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val info = app.imageStore.save(uri)
+                val old = _state.value.attachment
                 _state.update { it.copy(attachment = info) }
+                old?.let { app.imageStore.delete(it.path) }
                 thenSend?.let { submit(it) }
             } catch (e: Exception) {
                 addLine(SysLine(Tag.FAIL, "could not read image: ${e.message}"))

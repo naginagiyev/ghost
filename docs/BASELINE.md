@@ -125,3 +125,34 @@ Changes made in this phase because of measurements:
 - R8 broke generation: native code calls `SamplerConfig.getTopK()` by name through JNI, and the release build aborted with `JNI DETECTED ERROR ... mid == null`. Fixed with `-keep class com.google.ai.edge.litertlm.** { *; }`.
 - Thermal listener added: at `THERMAL_STATUS_SEVERE` or worse, answers are capped at 256 tokens and a `[warn] thermal throttling` line is shown. Not triggered on this phone in 5 minutes of continuous benchmarking.
 - Baseline Profile and ADPF were skipped: cold start is already 4x under budget, and decode speed did not drop under sustained load.
+
+## Phase 6: privacy checklist and failure tests
+
+Section 11 privacy checklist (all pass):
+
+- Merged release manifest has no `INTERNET` permission (`aapt2 dump permissions`). The only permission is androidx's internal signature permission `app.termchat.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+- `allowBackup=false` and `dataExtractionRules` (every domain excluded for cloud backup and device transfer) are in the merged manifest.
+- Runtime libraries: AndroidX (Compose, activity, lifecycle, Room), Kotlin, LiteRT-LM, Gson, kotlin-reflect. No analytics, crash reporting or networking libraries.
+- Release logs: a message with a unique word was sent and answered. The word appears nowhere in logcat from the app process (only in adbd's log of the test's own `input text` command).
+- Model, database and images are under `/data/user/0/app.termchat/` (`drwx------`). Files are `-rw-------`.
+- Deleting a conversation deletes its image file. Room creates `ON DELETE CASCADE` and turns on `PRAGMA foreign_keys`, so its messages are removed too.
+
+Section 12 failures, tried on purpose (no crash in any case):
+
+| Failure | Result |
+|---|---|
+| No model file | `[fail] no model found` and `run /import and pick the gemma .litertlm file`, red status dot |
+| Random bytes named `.litertlm` | `[fail] cannot read corrupt.litertlm: Failed to open LiteRT-LM file`, `run /import to replace the model file` |
+| Real model cut to 1 GB (interrupted copy) | same clear `[fail]` line |
+| GPU crash during load (crash flag) | `[warn] last load on gpu crashed, gpu disabled`, CPU used (Phase 2) |
+| Low free RAM | `[warn] low memory (N MB free), close other apps`, load still tried and succeeded |
+| Process killed in background | relaunch reloads, all chats intact (Phase 3) |
+| `/import` from Downloads | progress line, SHA-256 matched the official hash, old model replaced, reload on GPU in 10.6 s (compile cache rebuilt) |
+
+Fixes from this phase:
+
+- An image attached but then cleared (or replaced) before sending is now deleted from storage. Before, it stayed as an orphan file.
+- The `y` and `N` in the chat-list delete confirm now have larger tap areas.
+- Removed `FakeEngine` (unused since Phase 2) and the `room-ktx` dependency (Room 2.8 includes coroutine support in `room-runtime`).
+
+Release APK size: 23.1 MB.

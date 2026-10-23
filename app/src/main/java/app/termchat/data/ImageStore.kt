@@ -37,6 +37,8 @@ class ImageStore(private val context: Context) {
         info
     }
 
+    suspend fun delete(path: String) = withContext(Dispatchers.IO) { File(path).delete() }
+
     fun info(path: String): ImageInfo {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, options)
