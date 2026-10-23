@@ -103,7 +103,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             engine.state.collect { engineState ->
                 _state.update { it.copy(engine = engineState) }
                 val becameReady = engineState is EngineState.Ready && previous !is EngineState.Ready
-                if (becameReady && previous !is EngineState.Generating) prepareCurrent()
+                if (becameReady && previous !is EngineState.Generating && !_state.value.busy) prepareCurrent()
                 previous = engineState
             }
         }
