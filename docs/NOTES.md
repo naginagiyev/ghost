@@ -47,7 +47,7 @@ Answers to plan Section 13, checked on 2026-10-22 against the official docs, the
 ## 5. Token counts
 
 - `conversation.getTokenCount()` returns the exact number of tokens in the conversation so far.
-- `conversation.getBenchmarkInfo()` returns init time, time to first token, last prefill and decode token counts, and prefill and decode tokens/sec. Works with `ExperimentalFlags.enableBenchmark = true` (`@ExperimentalApi`), set before the engine is created.
+- `conversation.getBenchmarkInfo()` returns init time, time to first token, last prefill and decode token counts, and prefill and decode tokens/sec. Measured: `timeToFirstTokenInSecond` keeps the value of the conversation's first turn and does not change per turn, so the app measures time to first token with its own clock. Works with `ExperimentalFlags.enableBenchmark = true` (`@ExperimentalApi`), set before the engine is created.
 - No standalone tokenizer API. `ContextBuilder` uses `ceil(chars / 3.5)` for history that is not yet in the KV cache, and the status line uses the exact count from the conversation.
 
 ## 6. Thinking mode
@@ -84,3 +84,14 @@ Model card: `temperature=1.0`, `top_p=0.95`, `top_k=64` for all use cases. Same 
 
 - Braille spinner glyphs (U+2800 block) are missing from JetBrains Mono, so the spinner uses quadrant blocks `▘ ▝ ▗ ▖` (all in the font).
 - Font: the `NL` (no ligatures) variant of JetBrains Mono, so `->`, `!=` and similar stay literal like in a terminal.
+
+## Changes in Ghost (after the first version)
+
+- Renamed TermChat to Ghost, package `app.ghost`. Android treats it as a new app, so the model was copied in again.
+- Restore on open: `ConversationConfig(prefillPrefaceOnInit = true)` makes `createConversation` read the system prompt and all `initialMessages` right away. Confirmed on the phone: building a conversation with 16 messages (795 tokens) took 4.45 s, and the next turn only read the new 13 to 20 tokens. The app now builds the conversation when a chat is opened, when the model becomes ready, and after a stop, not when the first message is sent.
+- Two conversations can be alive on one engine at the same time. Titles are written by a short second conversation (greedy, at most 20 tokens) next to the live chat, so the chat's KV cache is kept.
+- Background calibration does not work on MIUI. A test that loaded the second backend after leaving the app was killed by `MiuiMemoryService` about 40 s later, while the process held 2.5 GB. So calibration is passive: the app uses GPU first, records real prefill speed from conversation builds (at least 128 tokens) and real decode speed from answers (at least 32 tokens), skipping the first of each after a load as warm-up. After 2 prefill and 3 decode samples on one backend, the next natural load uses the other one. When both are measured, the backend with the shorter typical turn (300 prompt tokens plus 200 answer tokens) is stored. On the Poco F3 it measured GPU 299 / 16.8 tok/s and CPU 140 / 14.3 tok/s and chose GPU.
+- The choice and "bad backend" flags are keyed by model size, app version and Android build fingerprint, so an app or system update measures again.
+- Low free RAM is no longer shown to the user. It is only logged in debug builds.
+- `/bench`, `/img` and `/calibrate` were removed. The answer footer no longer shows tokens, speed and time; only `interrupted` or `error` is shown when it applies.
+- Camera photos use `ActivityResultContracts.TakePicture` with a private `FileProvider` path in the cache folder. The app does not need the CAMERA permission because the system camera app takes the photo.

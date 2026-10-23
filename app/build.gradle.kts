@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "app.termchat"
+    namespace = "app.ghost"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "app.termchat"
+        applicationId = "app.ghost"
         minSdk = 26
         targetSdk = 37
         versionCode = 1

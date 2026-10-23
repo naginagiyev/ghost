@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TermChat"
+rootProject.name = "Ghost"
 include(":app")
