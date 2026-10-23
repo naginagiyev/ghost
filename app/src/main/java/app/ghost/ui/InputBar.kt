@@ -72,19 +72,6 @@ fun InputBar(
                 TermButton("remove", Palette.error, onClearAttachment)
             }
         }
-        if (attachMenu) {
-            Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
-                BasicText("attach", Modifier.weight(1f), style = BodyStyle.copy(color = Palette.dim))
-                TermButton("gallery", Palette.accent) {
-                    attachMenu = false
-                    onGallery()
-                }
-                TermButton("camera", Palette.accent) {
-                    attachMenu = false
-                    onCamera()
-                }
-            }
-        }
         if (suggestions.isNotEmpty()) {
             Row(
                 Modifier.horizontalScroll(rememberScrollState()).padding(top = Spacing.tight),
@@ -120,6 +107,16 @@ fun InputBar(
                     maxLines = MAX_INPUT_LINES,
                     onTextLayout = { layout.value = it },
                 )
+            }
+            if (attachMenu) {
+                TermButton("gallery", Palette.accent) {
+                    attachMenu = false
+                    onGallery()
+                }
+                TermButton("camera", Palette.accent) {
+                    attachMenu = false
+                    onCamera()
+                }
             }
             Box(
                 Modifier
