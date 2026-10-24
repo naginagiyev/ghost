@@ -57,4 +57,18 @@ class ContextBuilderTest {
     fun latestMessageTooLongThrows() {
         ContextBuilder.build(emptyList(), ContextBuilder.estimate(user(3500)), systemTokens = 10, contextTokens = 1000, maxNewTokens = 100)
     }
+
+    @Test
+    fun exactTokenCountReplacesEstimate() {
+        val exact = Turn(Role.USER, "u".repeat(350), tokens = 40)
+        assertEquals(40, ContextBuilder.estimate(exact))
+    }
+
+    @Test
+    fun historyBudgetLimitsRestoredTurns() {
+        val history = listOf(user(70), assistant(70), user(70), assistant(70))
+        val built = ContextBuilder.build(history, 10, systemTokens = 0, contextTokens = 1000, maxNewTokens = 100, historyBudget = 50)
+        assertEquals(2, built.history.size)
+        assertEquals(2, built.dropped)
+    }
 }

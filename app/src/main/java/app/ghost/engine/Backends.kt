@@ -3,6 +3,7 @@ package app.ghost.engine
 import android.content.Context
 import android.os.Build
 import app.ghost.BuildConfig
+import app.ghost.Config
 import com.google.ai.edge.litertlm.Backend
 import java.io.File
 
@@ -40,33 +41,37 @@ class Backends(context: Context) {
             .commit()
     }
 
-    fun markLoading(name: String) {
-        prefs.edit().putString(KEY_LOADING, name).commit()
+    fun markLoading(file: File, name: String, contextTokens: Int) {
+        prefs.edit().putString(KEY_LOADING, "${file.length()}|$name|$contextTokens").commit()
     }
 
     fun clearLoading() {
         prefs.edit().remove(KEY_LOADING).commit()
     }
 
-    fun consumeCrash(file: File): String? {
-        val crashed = prefs.getString(KEY_LOADING, null) ?: return null
-        val editor = prefs.edit().remove(KEY_LOADING).putBoolean(badKey(crashed), true)
-        if (prefs.getString(choiceKey(file), null) == crashed) editor.remove(choiceKey(file))
-        editor.commit()
-        return crashed
+    fun consumeCrash(file: File): Pair<String, Int>? {
+        val parts = prefs.getString(KEY_LOADING, null)?.split('|') ?: return null
+        prefs.edit().remove(KEY_LOADING).commit()
+        if (parts.size != 3 || parts[0] != file.length().toString()) return null
+        return parts[1] to (parts[2].toIntOrNull() ?: 0)
     }
 
-    fun isBad(name: String): Boolean = prefs.getBoolean(badKey(name), false)
+    fun isBad(file: File, name: String): Boolean = prefs.getBoolean(badKey(file, name), false)
 
-    fun markBad(name: String) {
-        prefs.edit().putBoolean(badKey(name), true).commit()
+    fun markBad(file: File, name: String) {
+        val editor = prefs.edit().putBoolean(badKey(file, name), true)
+        if (prefs.getString(choiceKey(file), null) == name) editor.remove(choiceKey(file))
+        editor.commit()
     }
 
     fun store(file: File, name: String) {
         prefs.edit().putString(choiceKey(file), name).commit()
     }
 
-    private fun stored(file: File): String? = prefs.getString(choiceKey(file), null)?.takeIf { !isBad(it) }
+    fun prefillSpeed(file: File, name: String): Double =
+        prefs.getFloat(speedKey(file, name, PREFILL), 0f).toDouble().takeIf { it > 0 } ?: Config.DEFAULT_PREFILL_SPEED
+
+    private fun stored(file: File): String? = prefs.getString(choiceKey(file), null)?.takeIf { !isBad(file, it) }
 
     private fun measured(file: File, name: String): Boolean =
         prefs.getInt(countKey(file, name, PREFILL), 0) >= PREFILL_SAMPLES &&
@@ -81,7 +86,7 @@ class Backends(context: Context) {
 
     private fun choiceKey(file: File) = "backend_${file.length()}_$environment"
 
-    private fun badKey(name: String) = "bad_${name}_$environment"
+    private fun badKey(file: File, name: String) = "bad_${name}_${file.length()}_$environment"
 
     private fun countKey(file: File, name: String, kind: String) = "${kind}_count_${name}_${file.length()}_$environment"
 

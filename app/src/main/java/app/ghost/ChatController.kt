@@ -7,16 +7,21 @@ import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.ghost.data.ChatRow
+import app.ghost.data.DocInfo
 import app.ghost.data.ImageInfo
 import app.ghost.data.Message
 import app.ghost.data.MessageRole
 import app.ghost.data.MessageStatus
+import app.ghost.data.tokenText
+import app.ghost.engine.ChatContext
 import app.ghost.engine.ContextBuilder
 import app.ghost.engine.ContextTooLongException
 import app.ghost.engine.EngineState
 import app.ghost.engine.GenEvent
 import app.ghost.engine.GenRequest
 import app.ghost.engine.GenStats
+import app.ghost.engine.LoadedModel
+import app.ghost.engine.ModelFile
 import app.ghost.engine.Role
 import app.ghost.engine.SysLine
 import app.ghost.engine.Tag
@@ -51,18 +56,22 @@ data class SystemItem(override val key: String, val tag: Tag, val text: String, 
 
 data class EchoItem(override val key: String, val text: String) : Item
 
-data class UserItem(override val key: String, val text: String, val image: ImageInfo?) : Item
+data class UserItem(override val key: String, val text: String, val image: ImageInfo?, val doc: DocInfo?) : Item
 
 data class AssistantItem(override val key: String, val text: String, val footer: String) : Item
 
-enum class Screen { SESSION, CHATS }
+enum class Screen { SESSION, CHATS, MODELS }
 
 sealed interface Effect {
     data object PickImage : Effect
     data object TakePhoto : Effect
+    data object PickDocument : Effect
     data object PickModel : Effect
     data object ScrollToBottom : Effect
 }
+
+@Immutable
+data class Draft(val id: Long, val text: String)
 
 @Immutable
 data class SessionState(
@@ -70,12 +79,17 @@ data class SessionState(
     val chatId: Long? = null,
     val items: List<Item> = emptyList(),
     val engine: EngineState = EngineState.Unloaded,
+    val model: LoadedModel? = null,
+    val models: List<ModelFile> = emptyList(),
     val contextUsed: Int = 0,
     val busy: Boolean = false,
     val streaming: Boolean = false,
     val streamStartedAt: Long = 0,
     val attachment: ImageInfo? = null,
+    val document: DocInfo? = null,
     val pendingDelete: Boolean = false,
+    val editing: Boolean = false,
+    val draft: Draft? = null,
 )
 
 class ChatController(application: Application) : AndroidViewModel(application) {
@@ -90,7 +104,10 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     private val effectChannel = Channel<Effect>(Channel.BUFFERED)
     val effects: Flow<Effect> = effectChannel.receiveAsFlow()
     private val streamDispatcher = Dispatchers.Default.limitedParallelism(1)
+    private val docTexts = HashMap<String, String>()
     private var messages: List<Message> = emptyList()
+    private var summary = ""
+    private var summaryUpTo = 0L
     private var generation: Job? = null
     private var lastStats: GenStats? = null
     private var nextKey = 0L
@@ -98,6 +115,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch { engine.lines.collect(::addLine) }
+        viewModelScope.launch { engine.model.collect { loaded -> _state.update { it.copy(model = loaded) } } }
         viewModelScope.launch {
             var previous = engine.state.value
             engine.state.collect { engineState ->
@@ -123,9 +141,9 @@ class ChatController(application: Application) : AndroidViewModel(application) {
                 addLine(SysLine(Tag.FAIL, "unknown command ${input.word}, try /help"))
             }
             is Input.Text -> {
-                if (input.text.isEmpty() && current.attachment == null) return false
+                if (input.text.isEmpty() && current.attachment == null && current.document == null) return false
                 if (current.busy) return false
-                send(input.text, current.attachment)
+                if (current.editing) editLast(input.text) else send(input.text, current.attachment, current.document)
             }
         }
         return true
@@ -146,7 +164,37 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         if (!refuseWhileBusy()) _state.update { it.copy(screen = Screen.CHATS) }
     }
 
+    fun showModels() {
+        if (refuseWhileBusy()) return
+        viewModelScope.launch {
+            val models = withContext(Dispatchers.IO) { app.modelStore.list() }
+            _state.update { it.copy(screen = Screen.MODELS, models = models) }
+        }
+    }
+
     fun showSession() = _state.update { it.copy(screen = Screen.SESSION) }
+
+    fun switchModel(model: ModelFile) {
+        showSession()
+        if (model.active || refuseWhileBusy()) return
+        app.modelStore.setActive(model.file)
+        addLine(SysLine(Tag.DIM, "switching to ${model.label}"))
+        engine.unload()
+        engine.load()
+    }
+
+    fun deleteModel(model: ModelFile) {
+        viewModelScope.launch {
+            val deleted = withContext(Dispatchers.IO) { app.modelStore.delete(model.file) }
+            if (deleted) addLine(SysLine(Tag.OK, "deleted model ${model.label}"))
+            val models = withContext(Dispatchers.IO) { app.modelStore.list() }
+            _state.update { it.copy(models = models) }
+        }
+    }
+
+    fun importModel() {
+        if (!refuseWhileBusy()) effectChannel.trySend(Effect.PickModel)
+    }
 
     fun openChat(id: Long) {
         if (refuseWhileBusy()) return
@@ -157,8 +205,8 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     fun newChat() {
         if (refuseWhileBusy()) return
         initialLoad.cancel()
-        messages = emptyList()
-        _state.update { it.copy(screen = Screen.SESSION, chatId = null, items = emptyList(), contextUsed = 0) }
+        resetChat()
+        _state.update { it.copy(screen = Screen.SESSION) }
         addLine(SysLine(Tag.DIM, "new conversation"))
         prepareCurrent()
     }
@@ -167,8 +215,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteConversation(id)
             if (_state.value.chatId == id) {
-                messages = emptyList()
-                _state.update { it.copy(chatId = null, items = emptyList(), contextUsed = 0) }
+                resetChat()
                 prepareCurrent()
             }
         }
@@ -192,12 +239,19 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             repository.deleteConversation(chatId)
-            messages = emptyList()
-            _state.update { it.copy(chatId = null, items = emptyList(), contextUsed = 0) }
+            resetChat()
             addLine(SysLine(Tag.OK, "conversation deleted"))
             prepareCurrent()
         }
     }
+
+    fun startEdit(item: UserItem) {
+        val last = messages.lastOrNull { it.role == MessageRole.USER } ?: return
+        if ("m${last.id}" != item.key || refuseWhileBusy()) return
+        _state.update { it.copy(editing = true, draft = Draft(System.nanoTime(), last.text)) }
+    }
+
+    fun cancelEdit() = _state.update { it.copy(editing = false, draft = Draft(System.nanoTime(), "")) }
 
     fun clearAttachment() {
         val old = _state.value.attachment ?: return
@@ -205,12 +259,23 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.imageStore.delete(old.path) }
     }
 
+    fun clearDocument() {
+        val old = _state.value.document ?: return
+        _state.update { it.copy(document = null) }
+        docTexts.remove(old.path)
+        viewModelScope.launch { app.docStore.delete(old.path) }
+    }
+
     fun pickImage() {
-        effectChannel.trySend(Effect.PickImage)
+        if (canSeeImages()) effectChannel.trySend(Effect.PickImage)
     }
 
     fun takePhoto() {
-        effectChannel.trySend(Effect.TakePhoto)
+        if (canSeeImages()) effectChannel.trySend(Effect.TakePhoto)
+    }
+
+    fun pickDocument() {
+        effectChannel.trySend(Effect.PickDocument)
     }
 
     fun onPhotoTaken(file: File) {
@@ -237,6 +302,22 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             }
         }
 
+    fun onDocumentPicked(uri: Uri, thenSend: String? = null): Job =
+        viewModelScope.launch {
+            addLine(SysLine(Tag.PENDING, "reading document", key = "doc"))
+            try {
+                val info = app.docStore.save(uri, documentCharLimit())
+                docTexts[info.path] = withContext(Dispatchers.IO) { app.docStore.read(info.path) }
+                _state.value.document?.let { clearDocument() }
+                _state.update { it.copy(document = info) }
+                addLine(SysLine(Tag.OK, "read ${info.name}, about ${tokenText(info.chars)} tokens", key = "doc"))
+                if (info.truncated) addLine(SysLine(Tag.WARN, "document is longer than this model's memory, only the first part was kept"))
+                thenSend?.let { submit(it) }
+            } catch (e: Exception) {
+                addLine(SysLine(Tag.FAIL, "could not read document: ${e.message}", key = "doc"))
+            }
+        }
+
     fun onModelPicked(uri: Uri) {
         if (refuseWhileBusy()) return
         _state.update { it.copy(busy = true) }
@@ -260,27 +341,62 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun canSeeImages(): Boolean {
+        if (_state.value.model?.vision != false) return true
+        addLine(SysLine(Tag.FAIL, "this model can't see images, switch model with /model"))
+        return false
+    }
+
+    private fun documentCharLimit(): Int {
+        val contextTokens = _state.value.model?.contextTokens ?: Config.CONTEXT_TOKENS
+        val tokens = contextTokens - ContextBuilder.systemTokens(summary) - Config.MAX_NEW_TOKENS - Config.DOC_PROMPT_RESERVE
+        return (tokens.coerceAtLeast(500) * Config.CHARS_PER_TOKEN).toInt()
+    }
+
+    private fun resetChat() {
+        messages = emptyList()
+        summary = ""
+        summaryUpTo = 0
+        _state.update { it.copy(chatId = null, items = emptyList(), contextUsed = 0, editing = false) }
+    }
+
     private suspend fun openChat(id: Long, keepLines: Boolean) {
+        val conversation = repository.conversation(id)
         val loaded = repository.messages(id)
-        val chatItems = withContext(Dispatchers.IO) { loaded.map { it.toItem() } }
+        val chatItems = withContext(Dispatchers.IO) {
+            loaded.mapNotNull { message -> message.docPath?.let { path -> path to app.docStore.read(path) } }
+                .forEach { (path, text) -> docTexts[path] = text }
+            loaded.map { it.toItem() }
+        }
         messages = loaded
-        val turns = loaded.mapNotNull { it.toTurn() }
+        summary = conversation?.summary.orEmpty()
+        summaryUpTo = conversation?.summaryUpTo ?: 0
         _state.update {
             val lines = if (keepLines) it.items.filter { item -> item is SystemItem || item is EchoItem } else emptyList()
             it.copy(
                 screen = Screen.SESSION,
                 chatId = id,
                 items = chatItems + lines,
-                contextUsed = ContextBuilder.estimateAll(turns),
+                contextUsed = ContextBuilder.estimateAll(historyTurns(), summary),
+                editing = false,
             )
         }
         effectChannel.trySend(Effect.ScrollToBottom)
         prepareCurrent()
     }
 
+    private fun chatContext(): ChatContext = ChatContext(
+        chatId = _state.value.chatId,
+        turnCount = messages.count { it.toTurn() != null },
+        history = historyTurns(),
+        summary = summary,
+    )
+
+    private fun historyTurns(): List<Turn> = messages.filter { it.id > summaryUpTo }.mapNotNull { it.toTurn() }
+
     private fun prepareCurrent() {
         if (engine.state.value !is EngineState.Ready) return
-        engine.prepare(_state.value.chatId, messages.mapNotNull { it.toTurn() })
+        engine.prepare(chatContext())
     }
 
     private fun refuseWhileBusy(): Boolean {
@@ -293,7 +409,8 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         when (command) {
             Command.NEW -> newChat()
             Command.CHATS -> showChats()
-            Command.IMPORT -> if (!refuseWhileBusy()) effectChannel.trySend(Effect.PickModel)
+            Command.MODEL -> showModels()
+            Command.IMPORT -> importModel()
             Command.STATS -> viewModelScope.launch { printStats() }
             Command.UNLOAD -> if (!refuseWhileBusy()) engine.unload()
             Command.RELOAD -> if (!refuseWhileBusy()) {
@@ -322,7 +439,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
-        addLine(SysLine(Tag.PLAIN, "context    ${_state.value.contextUsed}/${Config.CONTEXT_TOKENS} tokens"))
+        if (summary.isNotBlank()) addLine(SysLine(Tag.PLAIN, "notes      ${summary.lines().size} facts kept from older messages"))
     }
 
     private fun askDelete() {
@@ -335,30 +452,49 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(pendingDelete = true) }
     }
 
-    private fun send(text: String, attachment: ImageInfo?) {
-        _state.update { it.copy(busy = true, attachment = null) }
+    private fun editLast(text: String) {
+        val lastUser = messages.lastOrNull { it.role == MessageRole.USER }
+        _state.update { it.copy(editing = false) }
+        if (lastUser == null) return
+        val removed = messages.filter { it.createdAt >= lastUser.createdAt && it.id >= lastUser.id }
+        val keys = removed.map { "m${it.id}" }.toSet()
+        val image = lastUser.imagePath?.let { app.imageStore.info(it) }
+        val doc = lastUser.docPath?.let { app.docStore.info(it, lastUser.docName.orEmpty()) }
+        messages = messages - removed.toSet()
+        _state.update { current -> current.copy(items = current.items.filterNot { it.key in keys }) }
+        viewModelScope.launch {
+            repository.deleteMessages(removed)
+            send(text, image, doc)
+        }
+    }
+
+    private fun send(text: String, attachment: ImageInfo?, document: DocInfo?) {
+        _state.update { it.copy(busy = true, attachment = null, document = null) }
         generation = viewModelScope.launch {
             try {
                 initialLoad.join()
-                val chatId = _state.value.chatId ?: repository.createConversation(text).id
-                val history = messages.mapNotNull { it.toTurn() }
-                val now = System.currentTimeMillis()
+                val question = if (text.isEmpty() && document != null) Config.DOC_DEFAULT_QUESTION else text
+                val chatId = _state.value.chatId ?: repository.createConversation(question).id
+                val context = chatContext().copy(chatId = chatId)
                 val userMessage = repository.addMessage(
                     Message(
                         conversationId = chatId,
                         role = MessageRole.USER,
-                        text = text,
+                        text = question,
                         imagePath = attachment?.path,
                         status = MessageStatus.DONE,
-                        createdAt = now,
+                        createdAt = System.currentTimeMillis(),
                         genMs = null,
                         tokens = null,
+                        docPath = document?.path,
+                        docName = document?.name,
                     )
                 )
                 messages = messages + userMessage
-                _state.update { it.copy(chatId = chatId, items = it.items + UserItem(newKey(), text, attachment)) }
+                _state.update { it.copy(chatId = chatId, items = it.items + UserItem("m${userMessage.id}", question, attachment, document)) }
                 effectChannel.trySend(Effect.ScrollToBottom)
-                if (awaitReady()) generate(GenRequest(chatId, history, Turn(Role.USER, text, attachment?.path)))
+                val prompt = userMessage.toTurn() ?: Turn(Role.USER, question)
+                if (awaitReady()) generate(GenRequest(context, prompt), userMessage)
             } finally {
                 _state.update { it.copy(busy = false, streaming = false) }
             }
@@ -380,7 +516,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     }
 
     @OptIn(FlowPreview::class)
-    private suspend fun generate(request: GenRequest) {
+    private suspend fun generate(request: GenRequest, userMessage: Message) {
         val builder = StringBuilder()
         var done: GenEvent.Done? = null
         var failure: Throwable? = null
@@ -416,7 +552,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             failure = e
         } finally {
             withContext(NonCancellable) {
-                finishGeneration(request.chatId, builder.toString(), done, failure)
+                finishGeneration(request.chat.chatId ?: userMessage.conversationId, userMessage, builder.toString(), done, failure)
                 if (BuildConfig.DEBUG) {
                     val seconds = (System.currentTimeMillis() - startedAt) / 1000.0
                     Log.d("GHOST", "ui publishes=$publishes in %.1fs".format(seconds))
@@ -425,9 +561,13 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun finishGeneration(chatId: Long, text: String, done: GenEvent.Done?, failure: Throwable?) {
+    private suspend fun finishGeneration(chatId: Long, userMessage: Message, text: String, done: GenEvent.Done?, failure: Throwable?) {
         val stats = done?.stats
         if (stats != null) lastStats = stats
+        if (stats != null && stats.promptTokens > 0) {
+            repository.setTokens(userMessage.id, stats.promptTokens)
+            messages = messages.map { if (it.id == userMessage.id) it.copy(tokens = stats.promptTokens) else it }
+        }
         val status = when {
             failure != null -> MessageStatus.ERROR
             done == null || done.interrupted -> MessageStatus.INTERRUPTED
@@ -458,16 +598,45 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             status == MessageStatus.INTERRUPTED -> addLine(SysLine(Tag.INFO, "interrupted"))
         }
         val firstAnswer = messages.count { it.role == MessageRole.ASSISTANT } == 1
-        if (status == MessageStatus.DONE && text.isNotEmpty() && firstAnswer) {
-            generateTitle(chatId, messages.first { it.role == MessageRole.USER }.text, text)
-        } else if (status != MessageStatus.DONE || text.isEmpty()) {
-            prepareCurrent()
+        when {
+            status == MessageStatus.DONE && text.isNotEmpty() && firstAnswer -> generateTitle(chatId, userMessage.text, text)
+            status == MessageStatus.DONE && text.isNotEmpty() -> summarizeIfNeeded(chatId)
+            else -> prepareCurrent()
         }
     }
 
     private fun generateTitle(chatId: Long, userText: String, answer: String) {
         viewModelScope.launch {
             engine.title(userText, answer)?.let { repository.setGeneratedTitle(chatId, it) }
+            prepareCurrent()
+        }
+    }
+
+    private fun summarizeIfNeeded(chatId: Long) {
+        val contextTokens = _state.value.model?.contextTokens ?: Config.CONTEXT_TOKENS
+        val pending = messages.filter { it.id > summaryUpTo }.mapNotNull { message -> message.toTurn()?.let { message to it } }
+        val built = ContextBuilder.build(
+            pending.map { it.second },
+            Config.PREPARE_PROMPT_TOKENS,
+            systemTokens = ContextBuilder.systemTokens(summary),
+            contextTokens = contextTokens,
+            maxNewTokens = Config.MAX_NEW_TOKENS,
+            historyBudget = engine.historyBudget(),
+        )
+        if (built.dropped < Config.SUMMARY_MIN_MESSAGES) return
+        val dropped = pending.take(built.dropped)
+        val previous = summary
+        viewModelScope.launch {
+            val started = System.currentTimeMillis()
+            val notes = engine.summarize(previous, dropped.map { it.second })
+            if (notes != null && _state.value.chatId == chatId) {
+                summary = notes
+                summaryUpTo = dropped.last().first.id
+                repository.setSummary(chatId, notes, summaryUpTo)
+                if (BuildConfig.DEBUG) {
+                    Log.d("GHOST", "summarized ${dropped.size} messages in ${System.currentTimeMillis() - started} ms:\n$notes")
+                }
+            }
             prepareCurrent()
         }
     }
@@ -495,13 +664,18 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     private fun newKey(): String = "k${nextKey++}"
 
     private fun Message.toTurn(): Turn? {
-        if (text.isEmpty() && imagePath == null) return null
+        if (text.isEmpty() && imagePath == null && docPath == null) return null
         val role = if (role == MessageRole.USER) Role.USER else Role.ASSISTANT
-        return Turn(role, text, imagePath)
+        val document = docPath?.let { "Document \"${docName.orEmpty()}\":\n<<<\n${docTexts[it].orEmpty()}\n>>>\n\n" }.orEmpty()
+        return Turn(role, document + text, imagePath, tokens)
     }
 
     private fun Message.toItem(): Item {
-        if (role == MessageRole.USER) return UserItem("m$id", text, imagePath?.let { app.imageStore.info(it) })
+        if (role == MessageRole.USER) {
+            val image = imagePath?.let { app.imageStore.info(it) }
+            val doc = docPath?.let { app.docStore.info(it, docName.orEmpty()) }
+            return UserItem("m$id", text, image, doc)
+        }
         return AssistantItem("m$id", text, footer(this))
     }
 

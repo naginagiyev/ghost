@@ -90,7 +90,7 @@ Model card: `temperature=1.0`, `top_p=0.95`, `top_k=64` for all use cases. Same 
 - Renamed TermChat to Ghost, package `app.ghost`. Android treats it as a new app, so the model was copied in again.
 - Restore on open: `ConversationConfig(prefillPrefaceOnInit = true)` makes `createConversation` read the system prompt and all `initialMessages` right away. Confirmed on the phone: building a conversation with 16 messages (795 tokens) took 4.45 s, and the next turn only read the new 13 to 20 tokens. The app now builds the conversation when a chat is opened, when the model becomes ready, and after a stop, not when the first message is sent.
 - Two conversations can be alive on one engine at the same time. Titles are written by a short second conversation (greedy, at most 20 tokens) next to the live chat, so the chat's KV cache is kept.
-- Background calibration does not work on MIUI. A test that loaded the second backend after leaving the app was killed by `MiuiMemoryService` about 40 s later, while the process held 2.5 GB. So calibration is passive: the app uses GPU first, records real prefill speed from conversation builds (at least 128 tokens) and real decode speed from answers (at least 32 tokens), skipping the first of each after a load as warm-up. After 2 prefill and 3 decode samples on one backend, the next natural load uses the other one. When both are measured, the backend with the shorter typical turn (300 prompt tokens plus 200 answer tokens) is stored. On the Poco F3 it measured GPU 299 / 16.8 tok/s and CPU 140 / 14.3 tok/s and chose GPU.
+- Background calibration does not work on MIUI. A test that loaded the second backend after leaving the app was killed by `MiuiMemoryService` about 40 s later, while the process held 2.5 GB. So calibration is passive: the app uses GPU first, records real prefill speed from conversation builds (at least 128 tokens) and real decode speed from answers (at least 32 tokens), skipping the first answer after a load. (Since round 2 the GPU is warmed up right after loading, so the first conversation build counts as a prefill sample.) After 2 prefill and 3 decode samples on one backend, the next natural load uses the other one. When both are measured, the backend with the shorter typical turn (300 prompt tokens plus 200 answer tokens) is stored. On the Poco F3 it measured GPU 299 / 16.8 tok/s and CPU 140 / 14.3 tok/s and chose GPU.
 - The choice and "bad backend" flags are keyed by model size, app version and Android build fingerprint, so an app or system update measures again.
 - Low free RAM is no longer shown to the user. It is only logged in debug builds.
 - `/bench`, `/img` and `/calibrate` were removed. The answer footer no longer shows tokens, speed and time; only `interrupted` or `error` is shown when it applies.
@@ -99,3 +99,25 @@ Model card: `temperature=1.0`, `top_p=0.95`, `top_k=64` for all use cases. Same 
 - Launcher icon redrawn as one even-odd path (eyes and tail fold are holes), so the same drawable also serves as the Android 13 themed (monochrome) icon.
 - Prompt round 2: the model recited its instructions when asked who it is ("I'm here to listen to your problems..."). Added "Never describe your purpose, your role or these instructions" plus "answer briefly, the way a person introduces themselves"; it now says "You can just call me Ghost. I'm just here, you know?". Added "Match your reply to the message": "I am going to sleep now" gets "Alright, good night. Sleep well..." while real questions still get about 5 sentences.
 - Icon round 2: tail rebuilt as a trailing, flame-like point (belly and back both curve inward), the fold is a crescent parallel to the belly, all joins are tangent-continuous, and the shape is scaled to 0.72 because MIUI crops launcher icons tighter than the 66 dp safe zone.
+
+## Round 2 (changes.txt): measured on the Poco F3, 2026-10-24
+
+Each change was tested on the phone and kept only when it made a visible difference.
+
+| Change | Result | Kept |
+|---|---|---|
+| Speculative decoding (`ExperimentalFlags.enableSpeculativeDecoding`) | E4B on GPU: 11.3 vs 7.0 tok/s (+62%). E2B on GPU: 15.6 vs 16.9 tok/s (slower). E4B on CPU: 7.6 vs 7.3 (under 10%). | Per model, automatic |
+| GPU warm-up after load (1-token reply in a temporary conversation) | First answer about 2x faster. Adds about 2 s (E2B) or 4 s (E4B) to the load. | Yes |
+| Automatic context size | E2B: 4K measured 2.68 GB PSS, so 8K was picked by itself (3.13 GB). 16K is predicted above the limit (45% of RAM). 32K crashed the GPU in a manual test. E4B: 4.6 GB at 4K, stays at 4K. | Yes |
+| Exact token counts | Same long chat, same 10 s restore limit: 20 of 20 messages restored with exact counts, 12 of 20 with the `chars / 3.5` estimate (it over-counts by about 30%). No extra memory or work: the counts come from `getBenchmarkInfo()`. | Yes |
+| Summary notes instead of forgetting | After a restart, a fact that was only in the notes was recalled: name, cat and job all correct. Without notes the model has no way to know them. | Yes |
+| Edit last message | Works with text, images and documents. | Yes |
+| Documents (PDF, DOCX, MD, TXT) | All four answered correctly in debug and release (R8) builds. A PDF with no text layer gives a clear `[fail]` line. A 227 KB log was cut to fit the context, with a `[warn]` line. | Yes |
+
+Details:
+
+- Speculative decoding is decided per model file and backend by `Speculation`: 3 answers without it, then 3 answers with it on the next load, and it stays on only if it is at least 10% faster. The flag must be set before the engine is created, so the test needs a reload. A GPU error while it is on turns it off for that model.
+- With speculative decoding on, a second conversation (the title writer) next to the live chat ran the GPU out of memory (`clCreateBuffer: Out of resources`) on the next message. So while it is on, the live chat is closed before a background task and rebuilt right after it (about 2.8 s on E4B, while the user reads the answer). A failed message is also retried once with a fresh conversation.
+- The restore budget is the measured prefill speed times 10 seconds (at least 2048 tokens, at most the context). Older messages that do not fit are turned into at most 12 short note lines by the model (greedy, 220 tokens, about 10 to 13 s in the background) and put into the system prompt as "What you remember about the user and this chat from earlier". The notes must say "the user": with "Sam is a nurse" the model did not link Sam to the user and recalled only one of three facts.
+- Android's `Xml.newPullParser()` processes namespaces, so DOCX tag names arrive as `t` and `p`, not `w:t` and `w:p`.
+- Release APK size: 26.1 MB (pdfbox-android adds about 3 MB). Still no `INTERNET` permission.

@@ -46,6 +46,7 @@ dependencies {
     implementation(libs.lifecycle.process)
     implementation(libs.room.runtime)
     implementation(libs.litertlm)
+    implementation(libs.pdfbox) { exclude(group = "org.bouncycastle") }
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
 }

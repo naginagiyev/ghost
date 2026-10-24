@@ -7,6 +7,8 @@ import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -50,16 +52,37 @@ interface ChatDao {
     @Query("SELECT imagePath FROM messages WHERE conversationId = :conversationId AND imagePath IS NOT NULL")
     suspend fun imagePaths(conversationId: Long): List<String>
 
+    @Query("SELECT docPath FROM messages WHERE conversationId = :conversationId AND docPath IS NOT NULL")
+    suspend fun docPaths(conversationId: Long): List<String>
+
     @Insert
     suspend fun insertMessage(message: Message): Long
+
+    @Query("UPDATE messages SET tokens = :tokens WHERE id = :id")
+    suspend fun setTokens(id: Long, tokens: Int)
+
+    @Query("DELETE FROM messages WHERE id IN (:ids)")
+    suspend fun deleteMessages(ids: List<Long>)
+
+    @Query("UPDATE conversations SET summary = :summary, summaryUpTo = :upTo WHERE id = :id")
+    suspend fun setSummary(id: Long, summary: String, upTo: Long)
 }
 
-@Database(entities = [Conversation::class, Message::class], version = 1, exportSchema = false)
+@Database(entities = [Conversation::class, Message::class], version = 2, exportSchema = false)
 abstract class Db : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN summaryUpTo INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN docPath TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN docName TEXT")
+            }
+        }
+
         fun create(context: Context): Db =
-            Room.databaseBuilder(context, Db::class.java, "ghost.db").build()
+            Room.databaseBuilder(context, Db::class.java, "ghost.db").addMigrations(MIGRATION_1_2).build()
     }
 }

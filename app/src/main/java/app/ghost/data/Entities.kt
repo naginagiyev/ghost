@@ -1,5 +1,6 @@
 package app.ghost.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -13,6 +14,8 @@ data class Conversation(
     val updatedAt: Long,
     val pinned: Boolean = false,
     val titleEdited: Boolean = false,
+    @ColumnInfo(defaultValue = "") val summary: String = "",
+    @ColumnInfo(defaultValue = "0") val summaryUpTo: Long = 0,
 )
 
 @Entity(
@@ -37,6 +40,8 @@ data class Message(
     val createdAt: Long,
     val genMs: Long?,
     val tokens: Int?,
+    val docPath: String? = null,
+    val docName: String? = null,
 )
 
 data class ChatRow(

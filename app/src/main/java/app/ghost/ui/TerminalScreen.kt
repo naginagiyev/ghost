@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -46,33 +47,28 @@ fun TerminalScreen(
     stream: StateFlow<String>,
     listState: LazyListState,
     thumbnail: suspend (String) -> Bitmap?,
-    onStatusClick: () -> Unit,
-    onSend: (String) -> Boolean,
-    onStop: () -> Unit,
-    onGallery: () -> Unit,
-    onCamera: () -> Unit,
-    onClearAttachment: () -> Unit,
-    onConfirmDelete: (Boolean) -> Unit,
+    onChatsClick: () -> Unit,
+    onModelClick: () -> Unit,
     onCopy: (String) -> Unit,
+    onEdit: (UserItem) -> Unit,
+    actions: InputActions,
 ) {
     Column(Modifier.fillMaxSize()) {
-        StatusLine(state, onStatusClick)
+        StatusLine(state, onChatsClick, onModelClick)
         Divider()
         Box(Modifier.weight(1f)) {
-            Transcript(state, stream, listState, thumbnail, onCopy)
+            Transcript(state, stream, listState, thumbnail, onCopy, onEdit)
         }
         Divider()
         InputBar(
             busy = state.busy,
             streaming = state.streaming,
             attachment = state.attachment,
+            document = state.document,
             pendingDelete = state.pendingDelete,
-            onSend = onSend,
-            onStop = onStop,
-            onGallery = onGallery,
-            onCamera = onCamera,
-            onClearAttachment = onClearAttachment,
-            onConfirmDelete = onConfirmDelete,
+            editing = state.editing,
+            draft = state.draft,
+            actions = actions,
         )
     }
 }
@@ -84,6 +80,7 @@ private fun Transcript(
     listState: LazyListState,
     thumbnail: suspend (String) -> Bitmap?,
     onCopy: (String) -> Unit,
+    onEdit: (UserItem) -> Unit,
 ) {
     var follow by remember { mutableStateOf(true) }
     val atBottom by remember {
@@ -114,7 +111,7 @@ private fun Transcript(
                 when (item) {
                     is SystemItem -> SystemLine(item, gapAbove = reversed.getOrNull(index + 1).let { it != null && it !is SystemItem })
                     is EchoItem -> EchoBlock(item)
-                    is UserItem -> UserBlock(item, thumbnail)
+                    is UserItem -> UserBlock(item, thumbnail, onEdit)
                     is AssistantItem -> AssistantBlock(item, onCopy)
                 }
             }
@@ -136,7 +133,7 @@ private fun Transcript(
 }
 
 @Composable
-private fun StatusLine(state: SessionState, onClick: () -> Unit) {
+private fun StatusLine(state: SessionState, onChatsClick: () -> Unit, onModelClick: () -> Unit) {
     val chat = state.chatId?.let { "chat-%02d".format(it) } ?: "new"
     val (dotColor, backend, word) = when (val engine = state.engine) {
         EngineState.Unloaded -> Triple(Palette.dim, "-", "unloaded")
@@ -145,23 +142,38 @@ private fun StatusLine(state: SessionState, onClick: () -> Unit) {
         is EngineState.Generating -> Triple(Palette.warning, engine.backend, "busy")
         is EngineState.Failed -> Triple(Palette.error, "-", "failed")
     }
-    val context = "${compact(state.contextUsed)}/${compact(Config.CONTEXT_TOKENS)}"
+    val total = state.model?.contextTokens ?: Config.CONTEXT_TOKENS
+    val context = "${compact(state.contextUsed)}/${compact(total)}"
     Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(interactionSource = null, indication = null, onClick = onClick)
-            .padding(horizontal = Spacing.screen, vertical = 8.dp),
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.screen),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BasicText(
             "ghost ~ $chat",
-            Modifier.weight(1f),
+            Modifier
+                .weight(1f)
+                .clickable(interactionSource = null, indication = null, onClick = onChatsClick)
+                .padding(vertical = 8.dp),
             style = SmallStyle.copy(color = Palette.text),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        BasicText("● ", style = SmallStyle.copy(color = dotColor))
-        BasicText("${Config.MODEL_LABEL}  $backend  $word  ctx $context", style = SmallStyle, maxLines = 1)
+        Row(
+            Modifier
+                .clickable(interactionSource = null, indication = null, onClick = onModelClick)
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText("● ", style = SmallStyle.copy(color = dotColor))
+            BasicText(
+                state.model?.label ?: "no model",
+                Modifier.widthIn(max = 130.dp),
+                style = SmallStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            BasicText("  $backend  $word  $context", style = SmallStyle, maxLines = 1)
+        }
     }
 }
 

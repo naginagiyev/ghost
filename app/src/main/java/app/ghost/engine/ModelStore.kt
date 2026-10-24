@@ -15,11 +15,34 @@ data class ModelCheck(val textBackends: List<String>, val vision: Boolean, val m
 
 data class ImportResult(val file: File, val sha256: String)
 
+data class ModelFile(val file: File, val label: String, val active: Boolean)
+
 class ModelStore(private val context: Context) {
     private val dir by lazy { File(context.filesDir, "models") }
+    private val prefs by lazy { context.getSharedPreferences("models", Context.MODE_PRIVATE) }
 
-    fun find(): File? = dir.listFiles { file -> file.isFile && file.name.endsWith(MODEL_SUFFIX) }
-        ?.maxByOrNull { it.lastModified() }
+    fun all(): List<File> = dir.listFiles { file -> file.isFile && file.name.endsWith(MODEL_SUFFIX) }
+        ?.sortedBy { it.name.lowercase() }
+        .orEmpty()
+
+    fun find(): File? {
+        val files = all()
+        val chosen = prefs.getString(KEY_ACTIVE, null)
+        return files.firstOrNull { it.name == chosen } ?: files.maxByOrNull { it.lastModified() }
+    }
+
+    fun list(): List<ModelFile> {
+        val active = find()
+        return all().map { ModelFile(it, label(it), it == active) }
+    }
+
+    fun setActive(file: File) {
+        prefs.edit().putString(KEY_ACTIVE, file.name).commit()
+    }
+
+    fun delete(file: File): Boolean = file != find() && file.delete()
+
+    fun label(file: File): String = file.name.removeSuffix(MODEL_SUFFIX).lowercase().removeSuffix("-it").replace("-it-", "-")
 
     fun inspect(file: File): ModelCheck = ModelInfo.from(file.absolutePath).use { info ->
         ModelCheck(
@@ -72,14 +95,16 @@ class ModelStore(private val context: Context) {
             part.delete()
             throw e
         }
-        dir.listFiles { file -> file.name.endsWith(MODEL_SUFFIX) }?.forEach { it.delete() }
         val target = File(dir, name)
+        target.delete()
         if (!part.renameTo(target)) throw IOException("rename failed")
+        setActive(target)
         ImportResult(target, digest.digest().joinToString("") { "%02x".format(it) })
     }
 
     private companion object {
         const val MODEL_SUFFIX = ".litertlm"
+        const val KEY_ACTIVE = "active"
         const val SPACE_MARGIN_BYTES = 512L shl 20
         const val BUFFER_BYTES = 1 shl 20
     }

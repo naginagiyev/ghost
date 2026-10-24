@@ -75,11 +75,17 @@ fun EchoBlock(item: EchoItem) {
 }
 
 @Composable
-fun UserBlock(item: UserItem, thumbnail: suspend (String) -> Bitmap?) {
-    Row(Modifier.padding(top = Spacing.block)) {
+fun UserBlock(item: UserItem, thumbnail: suspend (String) -> Bitmap?, onEdit: (UserItem) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(top = Spacing.block)
+            .combinedClickable(interactionSource = null, indication = null, onClick = {}, onLongClick = { onEdit(item) })
+    ) {
         BasicText("› ", style = BodyStyle.copy(color = Palette.user))
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.tight)) {
             item.image?.let { ImageTag(it, thumbnail) }
+            item.doc?.let { BasicText(it.label, style = BodyStyle.copy(color = Palette.dim)) }
             if (item.text.isNotEmpty()) BasicText(item.text, style = BodyStyle)
         }
     }

@@ -1,1 +1,3 @@
 -keep class com.google.ai.edge.litertlm.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn com.gemalto.jp2.**

@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,23 +28,36 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.ghost.Draft
+import app.ghost.data.DocInfo
 import app.ghost.data.ImageInfo
 
 private const val MAX_INPUT_LINES = 6
+
+class InputActions(
+    val onSend: (String) -> Boolean,
+    val onStop: () -> Unit,
+    val onGallery: () -> Unit,
+    val onCamera: () -> Unit,
+    val onFile: () -> Unit,
+    val onClearAttachment: () -> Unit,
+    val onClearDocument: () -> Unit,
+    val onConfirmDelete: (Boolean) -> Unit,
+    val onCancelEdit: () -> Unit,
+)
 
 @Composable
 fun InputBar(
     busy: Boolean,
     streaming: Boolean,
     attachment: ImageInfo?,
+    document: DocInfo?,
     pendingDelete: Boolean,
-    onSend: (String) -> Boolean,
-    onStop: () -> Unit,
-    onGallery: () -> Unit,
-    onCamera: () -> Unit,
-    onClearAttachment: () -> Unit,
-    onConfirmDelete: (Boolean) -> Unit,
+    editing: Boolean,
+    draft: Draft?,
+    actions: InputActions,
 ) {
     var value by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var focused by remember { mutableStateOf(false) }
@@ -54,6 +68,10 @@ fun InputBar(
     val overflowing = (layout.value?.lineCount ?: 0) > MAX_INPUT_LINES
     val textColor = if (busy) Palette.dim else Palette.text
 
+    LaunchedEffect(draft?.id) {
+        draft?.let { value = TextFieldValue(it.text, TextRange(it.text.length)) }
+    }
+
     Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen)) {
         if (pendingDelete) {
             Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
@@ -62,14 +80,32 @@ fun InputBar(
                     Modifier.weight(1f),
                     style = BodyStyle.copy(color = Palette.warning),
                 )
-                TermButton("delete", Palette.error) { onConfirmDelete(true) }
-                TermButton("cancel", Palette.text) { onConfirmDelete(false) }
+                TermButton("delete", Palette.error) { actions.onConfirmDelete(true) }
+                TermButton("cancel", Palette.text) { actions.onConfirmDelete(false) }
+            }
+        }
+        if (editing) {
+            Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
+                BasicText("editing last message", Modifier.weight(1f), style = BodyStyle.copy(color = Palette.warning))
+                TermButton("cancel", Palette.text, actions.onCancelEdit)
             }
         }
         attachment?.let {
             Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
-                BasicText(it.label, style = BodyStyle.copy(color = Palette.dim))
-                TermButton("remove", Palette.error, onClearAttachment)
+                BasicText(it.label, Modifier.weight(1f, fill = false), style = BodyStyle.copy(color = Palette.dim))
+                TermButton("remove", Palette.error, actions.onClearAttachment)
+            }
+        }
+        document?.let {
+            Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    it.label,
+                    Modifier.weight(1f, fill = false),
+                    style = BodyStyle.copy(color = Palette.dim),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                TermButton("remove", Palette.error, actions.onClearDocument)
             }
         }
         if (suggestions.isNotEmpty()) {
@@ -109,13 +145,17 @@ fun InputBar(
                 )
             }
             if (attachMenu) {
-                TermButton("gallery", Palette.accent) {
+                TermButton("photo", Palette.accent) {
                     attachMenu = false
-                    onGallery()
+                    actions.onGallery()
                 }
                 TermButton("camera", Palette.accent) {
                     attachMenu = false
-                    onCamera()
+                    actions.onCamera()
+                }
+                TermButton("file", Palette.accent) {
+                    attachMenu = false
+                    actions.onFile()
                 }
             }
             Box(
@@ -126,11 +166,11 @@ fun InputBar(
             ) {
                 BasicText("+", style = BodyStyle.copy(color = if (attachMenu) Palette.accent else Palette.dim))
             }
-            if (streaming || busy) {
-                TermButton("stop", Palette.error, onStop)
-            } else {
-                TermButton("send", Palette.accent) {
-                    if (onSend(value.text)) value = TextFieldValue("")
+            when {
+                attachMenu -> Unit
+                streaming || busy -> TermButton("stop", Palette.error, actions.onStop)
+                else -> TermButton("send", Palette.accent) {
+                    if (actions.onSend(value.text)) value = TextFieldValue("")
                 }
             }
         }

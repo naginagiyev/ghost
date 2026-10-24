@@ -3,7 +3,8 @@ package app.ghost.ui
 enum class Command(val word: String, val help: String) {
     NEW("/new", "start a new conversation"),
     CHATS("/chats", "open the conversation list"),
-    IMPORT("/import", "import the model file"),
+    MODEL("/model", "switch between models"),
+    IMPORT("/import", "import a model file"),
     STATS("/stats", "device, model, memory and last run"),
     UNLOAD("/unload", "unload the model"),
     RELOAD("/reload", "reload the model"),

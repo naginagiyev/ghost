@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import app.ghost.ui.ChatsScreen
+import app.ghost.ui.InputActions
+import app.ghost.ui.ModelsScreen
 import app.ghost.ui.Palette
 import app.ghost.ui.TerminalScreen
 import java.io.File
@@ -66,9 +68,15 @@ class MainActivity : ComponentActivity() {
         if (!BuildConfig.DEBUG) return
         val prompt = intent.getStringExtra("prompt") ?: return
         val image = intent.getStringExtra("image")
+        val doc = intent.getStringExtra("doc")
         intent.removeExtra("prompt")
         intent.removeExtra("image")
-        if (image != null) controller.onImagePicked(Uri.fromFile(File(image)), prompt) else controller.submit(prompt)
+        intent.removeExtra("doc")
+        when {
+            image != null -> controller.onImagePicked(Uri.fromFile(File(image)), prompt)
+            doc != null -> controller.onDocumentPicked(Uri.fromFile(File(doc)), prompt)
+            else -> controller.submit(prompt)
+        }
     }
 
     private fun copyToClipboard(text: String) {
@@ -91,6 +99,9 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(controller::onModelPicked)
     }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { controller.onDocumentPicked(it) }
+    }
     val context = LocalContext.current
     val photoFile = remember { File(File(context.cacheDir, "camera"), "photo.jpg") }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
@@ -112,6 +123,7 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
                     }
                 }
                 Effect.PickModel -> modelPicker.launch(arrayOf("*/*"))
+                Effect.PickDocument -> documentPicker.launch(DOCUMENT_TYPES)
                 Effect.ScrollToBottom -> listState.scrollToItem(0)
             }
         }
@@ -128,14 +140,21 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
                 stream = controller.stream,
                 listState = listState,
                 thumbnail = controller::thumbnail,
-                onStatusClick = controller::showChats,
-                onSend = controller::submit,
-                onStop = controller::stop,
-                onGallery = controller::pickImage,
-                onCamera = controller::takePhoto,
-                onClearAttachment = controller::clearAttachment,
-                onConfirmDelete = controller::confirmDelete,
+                onChatsClick = controller::showChats,
+                onModelClick = controller::showModels,
                 onCopy = onCopy,
+                onEdit = controller::startEdit,
+                actions = InputActions(
+                    onSend = controller::submit,
+                    onStop = controller::stop,
+                    onGallery = controller::pickImage,
+                    onCamera = controller::takePhoto,
+                    onFile = controller::pickDocument,
+                    onClearAttachment = controller::clearAttachment,
+                    onClearDocument = controller::clearDocument,
+                    onConfirmDelete = controller::confirmDelete,
+                    onCancelEdit = controller::cancelEdit,
+                ),
             )
             Screen.CHATS -> ChatsScreen(
                 chats = controller.chats,
@@ -146,6 +165,20 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
                 onNew = controller::newChat,
                 onBack = controller::showSession,
             )
+            Screen.MODELS -> ModelsScreen(
+                models = state.models,
+                onSwitch = controller::switchModel,
+                onDelete = controller::deleteModel,
+                onImport = controller::importModel,
+                onBack = controller::showSession,
+            )
         }
     }
 }
+
+private val DOCUMENT_TYPES = arrayOf(
+    "application/pdf",
+    "text/*",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream",
+)
