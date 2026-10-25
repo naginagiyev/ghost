@@ -6,13 +6,16 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,7 +32,6 @@ import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import app.ghost.AssistantItem
-import app.ghost.EchoItem
 import app.ghost.SystemItem
 import app.ghost.UserItem
 import app.ghost.data.ImageInfo
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.StateFlow
 
 private val finishedBlocks = LruCache<String, List<MdBlock>>(256)
 private val blockGap = Arrangement.spacedBy(6.dp)
+private val TableStyle = BodyStyle.copy(lineHeight = 1.2.em)
 private val labelColumn = Regex("^\\S+ {2,}")
 
 @Composable
@@ -63,14 +66,6 @@ fun SystemLine(item: SystemItem, gapAbove: Boolean) {
             BasicText(" ", style = BodyStyle)
             Spinner(BodyStyle.copy(color = Palette.dim))
         }
-    }
-}
-
-@Composable
-fun EchoBlock(item: EchoItem) {
-    Row(Modifier.padding(top = Spacing.block)) {
-        BasicText("› ", style = BodyStyle.copy(color = Palette.user))
-        BasicText(item.text, style = BodyStyle)
     }
 }
 
@@ -175,12 +170,18 @@ private fun MarkdownBlock(
     modifier: Modifier = Modifier,
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
+    if (block is MdBlock.Table) {
+        Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            BasicText(block.text, modifier, style = TableStyle, softWrap = false, onTextLayout = onTextLayout)
+        }
+        return
+    }
     val blockModifier = when (block) {
         is MdBlock.Code -> Modifier
             .fillMaxWidth()
             .background(Palette.codeBackground)
             .padding(vertical = Spacing.tight)
-        is MdBlock.Text -> Modifier
+        else -> Modifier
     }
     BasicText(block.text, blockModifier.then(modifier), style = BodyStyle, onTextLayout = onTextLayout)
 }

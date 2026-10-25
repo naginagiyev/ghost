@@ -8,6 +8,7 @@ object Config {
     const val MAX_NEW_TOKENS = 1024
     const val THROTTLED_MAX_NEW_TOKENS = 256
     const val UNLOAD_GRACE_MS = 30_000L
+    const val TYPING_QUIET_MS = 1200L
     const val STREAM_UI_INTERVAL_MS = 33L
     const val IMAGE_MAX_SIDE = 512
     const val IMAGE_TOKEN_COST = 280

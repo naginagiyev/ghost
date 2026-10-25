@@ -21,7 +21,7 @@ The release build uses R8 and is signed with the debug key. For development use 
 ## Import a model
 
 1. Copy a `.litertlm` model (for example `gemma-4-E2B-it.litertlm`) to the phone, for example into `Download`.
-2. Open Ghost, type `/import` (or tap `+ import` on the models screen) and pick the file.
+2. Open Ghost, tap the model name at the top right, tap `+ import a .litertlm file` and pick the file.
 3. The app copies it into its private storage, checks it and switches to it.
 
 After the import the copy in `Download` can be deleted. Several models can be kept side by side.
@@ -38,18 +38,12 @@ adb shell run-as app.ghost cp /data/local/tmp/gemma-4-E2B-it.litertlm files/mode
 
 Type a message and tap `[ send ]`. Enter adds a new line. `+` opens `[ photo ]`, `[ camera ]` and `[ file ]` to attach one image or one document, `[ stop ]` ends an answer. Long-press an answer to copy it. Long-press your last message to edit it and get a new answer.
 
-Tap the left part of the top status line to see all chats, and the right part (model name) to open `~/models`: tap a model to switch to it, hold one to delete it. Hold a chat for `[ pin ]`, `[ rename ]` and `[ delete ]`. New chats get a short title written by the model after the first answer.
+Everything works with taps, there are no slash commands:
 
-| Command | Action |
-|---|---|
-| `/new` | start a new conversation |
-| `/chats` | open the conversation list |
-| `/model` | open the models screen to switch models |
-| `/import` | import a model file |
-| `/stats` | device, model, memory and last answer stats |
-| `/unload`, `/reload` | unload or reload the model |
-| `/delete` | delete the current conversation (asks with `[ delete ]` / `[ cancel ]`) |
-| `/help` | list commands |
+- `≡ chats` (top left) opens the chat list. Tap a chat to open it, hold it for `[ pin ]`, `[ rename ]` and `[ delete ]`, and use `+ new` to start a new one.
+- The model name (top right) opens `~/models`. Tap a model to switch to it, hold one to delete it, and tap `+ import a .litertlm file` to add one. The dot shows the state: green ready, amber loading or busy, red failed, gray unloaded.
+
+New chats get a short title written by the model after the first answer. Answers show Markdown: headings, lists, bold and italic, code, tables (drawn as a grid, scroll sideways when wide) and LaTeX formulas (shown as plain symbols, for example `½mv²`).
 
 The model loads when the app opens and unloads 30 seconds after the app goes to the background. Opening a chat restores its context right away, so the first message does not wait for it. CPU or GPU, the context size and speculative decoding are chosen automatically per model from measurements of normal use. Long chats keep short notes of important facts instead of forgetting old messages (see `docs/NOTES.md`).
 
@@ -57,7 +51,7 @@ Documents: PDF (with a text layer), DOCX, Markdown and TXT. The text is read on 
 
 ## Debug helpers
 
-Debug builds accept a prompt (and an optional `--es image` or `--es doc` path readable by the app) from adb:
+Debug builds accept a prompt (and an optional `--es image` or `--es doc` path readable by the app) from adb. The prompt `/new` starts a new conversation:
 
 ```
 adb shell am start -n app.ghost/.MainActivity --es prompt "why is the sky blue"

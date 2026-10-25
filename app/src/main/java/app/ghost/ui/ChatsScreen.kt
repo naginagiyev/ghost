@@ -116,7 +116,6 @@ fun ChatsScreen(
         item(key = "header") {
             Column(Modifier.padding(bottom = Spacing.tight)) {
                 BasicText("~/chats  (${rows.size})", style = BodyStyle.copy(color = Palette.accent))
-                BasicText("tap to open · hold for pin, rename, delete", style = SmallStyle)
             }
         }
         section(if (pinned.isNotEmpty()) "pinned" else null, pinned, 0)

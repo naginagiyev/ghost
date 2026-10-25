@@ -19,16 +19,12 @@ import app.ghost.engine.ContextTooLongException
 import app.ghost.engine.EngineState
 import app.ghost.engine.GenEvent
 import app.ghost.engine.GenRequest
-import app.ghost.engine.GenStats
 import app.ghost.engine.LoadedModel
 import app.ghost.engine.ModelFile
 import app.ghost.engine.Role
 import app.ghost.engine.SysLine
 import app.ghost.engine.Tag
 import app.ghost.engine.Turn
-import app.ghost.ui.Command
-import app.ghost.ui.Commands
-import app.ghost.ui.Input
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -53,8 +49,6 @@ sealed interface Item {
 }
 
 data class SystemItem(override val key: String, val tag: Tag, val text: String, val lineKey: String?) : Item
-
-data class EchoItem(override val key: String, val text: String) : Item
 
 data class UserItem(override val key: String, val text: String, val image: ImageInfo?, val doc: DocInfo?) : Item
 
@@ -87,7 +81,6 @@ data class SessionState(
     val streamStartedAt: Long = 0,
     val attachment: ImageInfo? = null,
     val document: DocInfo? = null,
-    val pendingDelete: Boolean = false,
     val editing: Boolean = false,
     val draft: Draft? = null,
 )
@@ -109,7 +102,6 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     private var summary = ""
     private var summaryUpTo = 0L
     private var generation: Job? = null
-    private var lastStats: GenStats? = null
     private var nextKey = 0L
     private val initialLoad: Job
 
@@ -129,25 +121,16 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     }
 
     fun submit(raw: String): Boolean {
+        val text = raw.trim()
         val current = _state.value
-        if (current.pendingDelete) _state.update { it.copy(pendingDelete = false) }
-        when (val input = Commands.parse(raw)) {
-            is Input.Run -> {
-                echo(raw.trim())
-                run(input.command)
-            }
-            is Input.Unknown -> {
-                echo(raw.trim())
-                addLine(SysLine(Tag.FAIL, "unknown command ${input.word}, try /help"))
-            }
-            is Input.Text -> {
-                if (input.text.isEmpty() && current.attachment == null && current.document == null) return false
-                if (current.busy) return false
-                if (current.editing) editLast(input.text) else send(input.text, current.attachment, current.document)
-            }
-        }
+        if (text.isEmpty() && current.attachment == null && current.document == null) return false
+        if (current.busy) return false
+        engine.userWaiting()
+        if (current.editing) editLast(text) else send(text, current.attachment, current.document)
         return true
     }
+
+    fun typing() = engine.userTyping()
 
     fun stop() {
         if (_state.value.streaming) {
@@ -167,9 +150,14 @@ class ChatController(application: Application) : AndroidViewModel(application) {
     fun showModels() {
         if (refuseWhileBusy()) return
         viewModelScope.launch {
-            val models = withContext(Dispatchers.IO) { app.modelStore.list() }
-            _state.update { it.copy(screen = Screen.MODELS, models = models) }
+            refreshModels()
+            _state.update { it.copy(screen = Screen.MODELS) }
         }
+    }
+
+    private suspend fun refreshModels() {
+        val models = withContext(Dispatchers.IO) { app.modelStore.list() }
+        _state.update { it.copy(models = models) }
     }
 
     fun showSession() = _state.update { it.copy(screen = Screen.SESSION) }
@@ -187,8 +175,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val deleted = withContext(Dispatchers.IO) { app.modelStore.delete(model.file) }
             if (deleted) addLine(SysLine(Tag.OK, "deleted model ${model.label}"))
-            val models = withContext(Dispatchers.IO) { app.modelStore.list() }
-            _state.update { it.copy(models = models) }
+            refreshModels()
         }
     }
 
@@ -228,21 +215,6 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     fun setPinned(id: Long, pinned: Boolean) {
         viewModelScope.launch { repository.setPinned(id, pinned) }
-    }
-
-    fun confirmDelete(confirmed: Boolean) {
-        _state.update { it.copy(pendingDelete = false) }
-        val chatId = _state.value.chatId
-        if (!confirmed || chatId == null) {
-            addLine(SysLine(Tag.INFO, "delete cancelled"))
-            return
-        }
-        viewModelScope.launch {
-            repository.deleteConversation(chatId)
-            resetChat()
-            addLine(SysLine(Tag.OK, "conversation deleted"))
-            prepareCurrent()
-        }
     }
 
     fun startEdit(item: UserItem) {
@@ -343,7 +315,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     private fun canSeeImages(): Boolean {
         if (_state.value.model?.vision != false) return true
-        addLine(SysLine(Tag.FAIL, "this model can't see images, switch model with /model"))
+        addLine(SysLine(Tag.FAIL, "this model can't see images, tap the model name at the top to switch"))
         return false
     }
 
@@ -372,7 +344,7 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         summary = conversation?.summary.orEmpty()
         summaryUpTo = conversation?.summaryUpTo ?: 0
         _state.update {
-            val lines = if (keepLines) it.items.filter { item -> item is SystemItem || item is EchoItem } else emptyList()
+            val lines = if (keepLines) it.items.filter { item -> item is SystemItem } else emptyList()
             it.copy(
                 screen = Screen.SESSION,
                 chatId = id,
@@ -403,53 +375,6 @@ class ChatController(application: Application) : AndroidViewModel(application) {
         if (!_state.value.busy) return false
         addLine(SysLine(Tag.WARN, "busy, press stop first"))
         return true
-    }
-
-    private fun run(command: Command) {
-        when (command) {
-            Command.NEW -> newChat()
-            Command.CHATS -> showChats()
-            Command.MODEL -> showModels()
-            Command.IMPORT -> importModel()
-            Command.STATS -> viewModelScope.launch { printStats() }
-            Command.UNLOAD -> if (!refuseWhileBusy()) engine.unload()
-            Command.RELOAD -> if (!refuseWhileBusy()) {
-                engine.unload()
-                engine.load()
-            }
-            Command.DELETE -> askDelete()
-            Command.HELP -> Commands.helpLines().forEach { addLine(SysLine(Tag.PLAIN, it)) }
-        }
-    }
-
-    private suspend fun printStats() {
-        engine.stats().forEach { addLine(SysLine(Tag.PLAIN, it)) }
-        val stats = lastStats
-        if (stats == null) {
-            addLine(SysLine(Tag.PLAIN, "last run   none"))
-        } else {
-            addLine(SysLine(Tag.PLAIN, "last run   ${stats.tokens} tok, ttft ${stats.ttftMs} ms, total ${stats.totalMs} ms"))
-            addLine(
-                SysLine(
-                    Tag.PLAIN,
-                    "speed      prefill %.1f tok/s, decode %.1f tok/s".format(
-                        stats.prefillTokensPerSecond,
-                        stats.decodeTokensPerSecond,
-                    ),
-                )
-            )
-        }
-        if (summary.isNotBlank()) addLine(SysLine(Tag.PLAIN, "notes      ${summary.lines().size} facts kept from older messages"))
-    }
-
-    private fun askDelete() {
-        val chatId = _state.value.chatId
-        if (chatId == null) {
-            addLine(SysLine(Tag.INFO, "nothing to delete"))
-            return
-        }
-        if (refuseWhileBusy()) return
-        _state.update { it.copy(pendingDelete = true) }
     }
 
     private fun editLast(text: String) {
@@ -563,7 +488,6 @@ class ChatController(application: Application) : AndroidViewModel(application) {
 
     private suspend fun finishGeneration(chatId: Long, userMessage: Message, text: String, done: GenEvent.Done?, failure: Throwable?) {
         val stats = done?.stats
-        if (stats != null) lastStats = stats
         if (stats != null && stats.promptTokens > 0) {
             repository.setTokens(userMessage.id, stats.promptTokens)
             messages = messages.map { if (it.id == userMessage.id) it.copy(tokens = stats.promptTokens) else it }
@@ -639,11 +563,6 @@ class ChatController(application: Application) : AndroidViewModel(application) {
             }
             prepareCurrent()
         }
-    }
-
-    private fun echo(text: String) {
-        _state.update { it.copy(items = it.items + EchoItem(newKey(), text)) }
-        effectChannel.trySend(Effect.ScrollToBottom)
     }
 
     private fun addLine(line: SysLine) {

@@ -17,6 +17,7 @@ object Palette {
     val dim = Color(0xFF5C6773)
     val user = Color(0xFF7EE787)
     val accent = Color(0xFF56D4DD)
+    val math = Color(0xFFD2A8FF)
     val warning = Color(0xFFE3B341)
     val error = Color(0xFFFF7B72)
     val codeBackground = Color(0xFF0D1117)

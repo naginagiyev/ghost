@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.ghost.AssistantItem
 import app.ghost.Config
-import app.ghost.EchoItem
 import app.ghost.SessionState
 import app.ghost.SystemItem
 import app.ghost.UserItem
@@ -65,7 +64,6 @@ fun TerminalScreen(
             streaming = state.streaming,
             attachment = state.attachment,
             document = state.document,
-            pendingDelete = state.pendingDelete,
             editing = state.editing,
             draft = state.draft,
             actions = actions,
@@ -110,7 +108,6 @@ private fun Transcript(
             itemsIndexed(reversed, key = { _, item -> item.key }, contentType = { _, item -> item::class }) { index, item ->
                 when (item) {
                     is SystemItem -> SystemLine(item, gapAbove = reversed.getOrNull(index + 1).let { it != null && it !is SystemItem })
-                    is EchoItem -> EchoBlock(item)
                     is UserItem -> UserBlock(item, thumbnail, onEdit)
                     is AssistantItem -> AssistantBlock(item, onCopy)
                 }
@@ -134,13 +131,12 @@ private fun Transcript(
 
 @Composable
 private fun StatusLine(state: SessionState, onChatsClick: () -> Unit, onModelClick: () -> Unit) {
-    val chat = state.chatId?.let { "chat-%02d".format(it) } ?: "new"
-    val (dotColor, backend, word) = when (val engine = state.engine) {
-        EngineState.Unloaded -> Triple(Palette.dim, "-", "unloaded")
-        EngineState.Loading -> Triple(Palette.warning, "-", "loading")
-        is EngineState.Ready -> Triple(Palette.user, engine.backend, "ready")
-        is EngineState.Generating -> Triple(Palette.warning, engine.backend, "busy")
-        is EngineState.Failed -> Triple(Palette.error, "-", "failed")
+    val (dotColor, backend) = when (val engine = state.engine) {
+        EngineState.Unloaded -> Palette.dim to "-"
+        EngineState.Loading -> Palette.warning to "-"
+        is EngineState.Ready -> Palette.user to engine.backend
+        is EngineState.Generating -> Palette.warning to engine.backend
+        is EngineState.Failed -> Palette.error to "-"
     }
     val total = state.model?.contextTokens ?: Config.CONTEXT_TOKENS
     val context = "${compact(state.contextUsed)}/${compact(total)}"
@@ -149,7 +145,7 @@ private fun StatusLine(state: SessionState, onChatsClick: () -> Unit, onModelCli
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BasicText(
-            "ghost ~ $chat",
+            "≡ chats",
             Modifier
                 .weight(1f)
                 .clickable(interactionSource = null, indication = null, onClick = onChatsClick)
@@ -166,13 +162,13 @@ private fun StatusLine(state: SessionState, onChatsClick: () -> Unit, onModelCli
         ) {
             BasicText("● ", style = SmallStyle.copy(color = dotColor))
             BasicText(
-                state.model?.label ?: "no model",
+                state.model?.label ?: if (state.engine is EngineState.Failed) "no model" else "",
                 Modifier.widthIn(max = 130.dp),
                 style = SmallStyle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            BasicText("  $backend  $word  $context", style = SmallStyle, maxLines = 1)
+            BasicText("  $backend  $context", style = SmallStyle, maxLines = 1)
         }
     }
 }

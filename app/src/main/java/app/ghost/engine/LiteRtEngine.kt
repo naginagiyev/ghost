@@ -4,7 +4,6 @@ import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import android.os.Debug
-import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import app.ghost.BuildConfig
@@ -23,10 +22,10 @@ import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +67,8 @@ class LiteRtEngine(
     @Volatile private var conversation: Conversation? = null
     @Volatile private var background: Conversation? = null
     @Volatile private var backgroundCancelled = false
+    @Volatile private var backgroundTyping = false
+    @Volatile private var lastTypingAt = 0L
     private var liveChatId: Long? = null
     private var liveFresh = false
     private var liveTurns = -1
@@ -86,6 +87,24 @@ class LiteRtEngine(
 
     override fun load() {
         scope.launch { mutex.withLock { if (engine == null) loadLocked() } }
+    }
+
+    override fun userTyping() {
+        lastTypingAt = SystemClock.elapsedRealtime()
+        backgroundTyping = true
+        runCatching { background?.cancelProcess() }
+    }
+
+    override fun userWaiting() {
+        lastTypingAt = 0
+    }
+
+    private suspend fun awaitQuiet() {
+        while (true) {
+            val left = lastTypingAt + Config.TYPING_QUIET_MS - SystemClock.elapsedRealtime()
+            if (left <= 0) return
+            delay(minOf(left, QUIET_POLL_MS))
+        }
     }
 
     override fun unload() {
@@ -146,6 +165,7 @@ class LiteRtEngine(
 
     override fun generate(request: GenRequest): Flow<GenEvent> = flow {
         cancelBackground()
+        prepareRequests.incrementAndGet()
         mutex.withLock {
             val loaded = engine ?: throw IllegalStateException("model not loaded")
             stopRequested = false
@@ -251,48 +271,42 @@ class LiteRtEngine(
         return runBackground(prompt, Config.SUMMARY_TOKENS)?.let(::cleanNotes)
     }
 
-    override suspend fun stats(): List<String> = withContext(Dispatchers.IO) {
-        val memory = memoryInfo()
-        val file = modelStore.find()
-        val pss = Debug.getPss() shr 10
-        val tokens = runCatching { conversation?.getTokenCount() }.getOrNull()
-        listOf(
-            "device     ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}, ${Build.SUPPORTED_ABIS[0]}",
-            "memory     ${memory.totalMem shr 20} MB total, ${memory.availMem shr 20} MB free, app pss $pss MB",
-            "model      ${file?.name ?: "none"} ${file?.let { "(${it.length() shr 20} MB)" } ?: ""}",
-            "engine     ${stateWord()}, backend ${backendName.ifEmpty { "-" }}, loaded in ${loadMs} ms",
-            "context    ${tokens ?: 0} of $contextTokens tokens in use, restore budget ${historyBudget()}",
-            "thermal    ${thermalWord()}",
-        )
+    private suspend fun runBackground(prompt: String, maxTokens: Int): String? {
+        backgroundCancelled = false
+        while (true) {
+            awaitQuiet()
+            if (backgroundCancelled) return null
+            backgroundTyping = false
+            val text = withContext(dispatcher) { mutex.withLock { runBackgroundOnce(prompt, maxTokens) } }
+            if (backgroundCancelled) return null
+            if (!backgroundTyping) return text
+            if (BuildConfig.DEBUG) Log.d(TAG, "background task paused for typing")
+        }
     }
 
-    private suspend fun runBackground(prompt: String, maxTokens: Int): String? = withContext(dispatcher) {
-        mutex.withLock {
-            val loaded = engine ?: return@withLock null
-            val config = ConversationConfig(
-                samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 1.0),
-                maxOutputToken = maxTokens,
-                thinkingConfig = ThinkingConfig(enableThinking = false),
-            )
-            backgroundCancelled = false
-            if (speculative) closeConversation()
-            try {
-                val temporary = loaded.createConversation(config)
-                background = temporary
-                temporary.use { textOf(it.sendMessage(prompt)) }.takeIf { !backgroundCancelled }
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.d(TAG, "background task stopped: ${e.message}")
-                null
-            } finally {
-                background = null
-            }
+    private fun runBackgroundOnce(prompt: String, maxTokens: Int): String? {
+        val loaded = engine ?: return null
+        val config = ConversationConfig(
+            samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 1.0),
+            maxOutputToken = maxTokens,
+            thinkingConfig = ThinkingConfig(enableThinking = false),
+        )
+        if (speculative) closeConversation()
+        return try {
+            val temporary = loaded.createConversation(config)
+            background = temporary
+            temporary.use { if (backgroundTyping || backgroundCancelled) null else textOf(it.sendMessage(prompt)) }
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "background task stopped: ${e.message}")
+            null
+        } finally {
+            background = null
         }
     }
 
     private fun cancelBackground() {
-        val running = background ?: return
         backgroundCancelled = true
-        runCatching { running.cancelProcess() }
+        runCatching { background?.cancelProcess() }
     }
 
     private suspend fun loadLocked() {
@@ -304,13 +318,13 @@ class LiteRtEngine(
         }
         val file = modelStore.find()
         if (file == null) {
-            fail("no model found", "run /import and pick a .litertlm model file")
+            fail("no model found", "tap the model name at the top and import a .litertlm model file")
             return
         }
         val check = try {
             modelStore.inspect(file)
         } catch (e: Exception) {
-            fail("cannot read ${file.name}: ${e.message}", "run /model to pick another model or /import a new one")
+            fail("cannot read ${file.name}: ${e.message}", "tap the model name at the top to pick another model")
             return
         }
         if (BuildConfig.DEBUG) Log.d(TAG, "model check $check, free ${memoryInfo().availMem shr 20} MB")
@@ -360,7 +374,7 @@ class LiteRtEngine(
     }
 
     private suspend fun open(file: File, name: String, size: Int, vision: Boolean): Boolean {
-        say(Tag.PENDING, "loading ${modelStore.label(file)} on $name", "load")
+        say(Tag.PENDING, "loading model", "load")
         val start = SystemClock.elapsedRealtime()
         backends.markLoading(file, name, size)
         return try {
@@ -384,8 +398,8 @@ class LiteRtEngine(
             warmAnswer = false
             memoryRecorded = false
             loadMs = SystemClock.elapsedRealtime() - start
-            if (BuildConfig.DEBUG) Log.d(TAG, "loaded spec=$draft ctx=$size in $loadMs ms, pss=${Debug.getPss() shr 10} MB")
-            say(Tag.OK, "${modelStore.label(file)} on $name, ${size / 1024}k context, loaded in %.1fs".format(loadMs / 1000.0), "load")
+            if (BuildConfig.DEBUG) Log.d(TAG, "loaded $name spec=$draft ctx=$size in $loadMs ms, pss=${Debug.getPss() shr 10} MB")
+            say(Tag.OK, "model loaded in %.1fs".format(loadMs / 1000.0), "load")
             true
         } catch (e: Exception) {
             say(Tag.FAIL, "$name load failed: ${e.message}", "load")
@@ -524,28 +538,6 @@ class LiteRtEngine(
         return ActivityManager.MemoryInfo().also { manager.getMemoryInfo(it) }
     }
 
-    private fun stateWord(): String = when (state.value) {
-        EngineState.Unloaded -> "unloaded"
-        EngineState.Loading -> "loading"
-        is EngineState.Ready -> "ready"
-        is EngineState.Generating -> "generating"
-        is EngineState.Failed -> "failed"
-    }
-
-    private fun thermalStatus(): Int {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return PowerManager.THERMAL_STATUS_NONE
-        return context.getSystemService(PowerManager::class.java).currentThermalStatus
-    }
-
-    private fun thermalWord(): String = when (thermalStatus()) {
-        PowerManager.THERMAL_STATUS_NONE -> "none"
-        PowerManager.THERMAL_STATUS_LIGHT -> "light"
-        PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
-        PowerManager.THERMAL_STATUS_SEVERE -> "severe"
-        PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
-        else -> "shutdown"
-    }
-
     private companion object {
         const val TAG = "GHOST"
         const val RESTORE_KEY = "restore"
@@ -554,5 +546,6 @@ class LiteRtEngine(
         const val SUMMARY_MAX_LINES = 12
         const val MIN_PREFILL_SAMPLE_TOKENS = 128
         const val MIN_DECODE_SAMPLE_TOKENS = 32
+        const val QUIET_POLL_MS = 100L
     }
 }

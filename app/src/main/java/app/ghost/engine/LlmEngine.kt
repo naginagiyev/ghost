@@ -55,6 +55,7 @@ interface LlmEngine {
     suspend fun title(userText: String, answer: String): String?
     suspend fun summarize(previous: String, turns: List<Turn>): String?
     fun historyBudget(): Int
-    suspend fun stats(): List<String>
+    fun userTyping()
+    fun userWaiting()
     fun setThrottled(throttled: Boolean)
 }

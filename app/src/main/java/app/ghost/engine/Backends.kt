@@ -1,5 +1,7 @@
 package app.ghost.engine
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import app.ghost.BuildConfig
@@ -7,7 +9,7 @@ import app.ghost.Config
 import com.google.ai.edge.litertlm.Backend
 import java.io.File
 
-class Backends(context: Context) {
+class Backends(private val context: Context) {
     private val prefs by lazy { context.getSharedPreferences("engine", Context.MODE_PRIVATE) }
     private val environment = "${BuildConfig.VERSION_CODE}_${Build.FINGERPRINT.hashCode()}"
 
@@ -53,7 +55,18 @@ class Backends(context: Context) {
         val parts = prefs.getString(KEY_LOADING, null)?.split('|') ?: return null
         prefs.edit().remove(KEY_LOADING).commit()
         if (parts.size != 3 || parts[0] != file.length().toString()) return null
-        return parts[1] to (parts[2].toIntOrNull() ?: 0)
+        val contextTokens = parts[2].toIntOrNull() ?: 0
+        return when (lastExitReason()) {
+            ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE, null -> parts[1] to contextTokens
+            ApplicationExitInfo.REASON_LOW_MEMORY -> if (contextTokens > Config.CONTEXT_TOKENS) parts[1] to contextTokens else null
+            else -> null
+        }
+    }
+
+    private fun lastExitReason(): Int? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val manager = context.getSystemService(ActivityManager::class.java)
+        return manager.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull()?.reason
     }
 
     fun isBad(file: File, name: String): Boolean = prefs.getBoolean(badKey(file, name), false)

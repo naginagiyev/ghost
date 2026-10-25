@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
         when {
             image != null -> controller.onImagePicked(Uri.fromFile(File(image)), prompt)
             doc != null -> controller.onDocumentPicked(Uri.fromFile(File(doc)), prompt)
+            prompt == "/new" -> controller.newChat()
             else -> controller.submit(prompt)
         }
     }
@@ -103,7 +104,7 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
         uri?.let { controller.onDocumentPicked(it) }
     }
     val context = LocalContext.current
-    val photoFile = remember { File(File(context.cacheDir, "camera"), "photo.jpg") }
+    val photoFile by remember { lazy { File(File(context.cacheDir, "camera"), "photo.jpg") } }
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
         if (taken) controller.onPhotoTaken(photoFile) else photoFile.delete()
     }
@@ -152,8 +153,8 @@ private fun Root(controller: ChatController, onCopy: (String) -> Unit) {
                     onFile = controller::pickDocument,
                     onClearAttachment = controller::clearAttachment,
                     onClearDocument = controller::clearDocument,
-                    onConfirmDelete = controller::confirmDelete,
                     onCancelEdit = controller::cancelEdit,
+                    onTyping = controller::typing,
                 ),
             )
             Screen.CHATS -> ChatsScreen(

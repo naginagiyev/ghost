@@ -40,7 +40,6 @@ fun ModelsScreen(
         item(key = "header") {
             Column(Modifier.padding(bottom = Spacing.tight)) {
                 BasicText("~/models  (${models.size})", style = BodyStyle.copy(color = Palette.accent))
-                BasicText("tap to switch · hold to delete", style = SmallStyle)
             }
         }
         itemsIndexed(models, key = { _, model -> model.file.name }) { index, model ->

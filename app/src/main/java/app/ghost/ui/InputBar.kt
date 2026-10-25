@@ -1,8 +1,6 @@
 package app.ghost.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -44,8 +41,8 @@ class InputActions(
     val onFile: () -> Unit,
     val onClearAttachment: () -> Unit,
     val onClearDocument: () -> Unit,
-    val onConfirmDelete: (Boolean) -> Unit,
     val onCancelEdit: () -> Unit,
+    val onTyping: () -> Unit,
 )
 
 @Composable
@@ -54,7 +51,6 @@ fun InputBar(
     streaming: Boolean,
     attachment: ImageInfo?,
     document: DocInfo?,
-    pendingDelete: Boolean,
     editing: Boolean,
     draft: Draft?,
     actions: InputActions,
@@ -64,7 +60,6 @@ fun InputBar(
     var attachMenu by remember { mutableStateOf(false) }
     val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
     val blink = rememberBlink()
-    val suggestions = remember(value.text) { Commands.suggestions(value.text) }
     val overflowing = (layout.value?.lineCount ?: 0) > MAX_INPUT_LINES
     val textColor = if (busy) Palette.dim else Palette.text
 
@@ -73,17 +68,6 @@ fun InputBar(
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.screen)) {
-        if (pendingDelete) {
-            Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
-                BasicText(
-                    "delete this conversation?",
-                    Modifier.weight(1f),
-                    style = BodyStyle.copy(color = Palette.warning),
-                )
-                TermButton("delete", Palette.error) { actions.onConfirmDelete(true) }
-                TermButton("cancel", Palette.text) { actions.onConfirmDelete(false) }
-            }
-        }
         if (editing) {
             Row(Modifier.padding(top = Spacing.tight), verticalAlignment = Alignment.CenterVertically) {
                 BasicText("editing last message", Modifier.weight(1f), style = BodyStyle.copy(color = Palette.warning))
@@ -108,28 +92,15 @@ fun InputBar(
                 TermButton("remove", Palette.error, actions.onClearDocument)
             }
         }
-        if (suggestions.isNotEmpty()) {
-            Row(
-                Modifier.horizontalScroll(rememberScrollState()).padding(top = Spacing.tight),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                suggestions.forEach { command ->
-                    BasicText(
-                        command.word,
-                        Modifier.clickable {
-                            value = TextFieldValue(command.word, TextRange(command.word.length))
-                        }.padding(vertical = 6.dp),
-                        style = BodyStyle.copy(color = Palette.dim),
-                    )
-                }
-            }
-        }
         Row(verticalAlignment = Alignment.Bottom) {
             BasicText("› ", Modifier.padding(vertical = 10.dp), style = BodyStyle.copy(color = Palette.user))
             Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
                 BasicTextField(
                     value = value,
-                    onValueChange = { value = it },
+                    onValueChange = {
+                        if (it.text != value.text) actions.onTyping()
+                        value = it
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { focused = it.isFocused }
