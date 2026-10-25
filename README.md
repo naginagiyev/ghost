@@ -1,10 +1,10 @@
-<h1 align="center">
-  <img src="docs/assets/icon.svg" width="72" align="center" alt="Ghost icon">&nbsp;Ghost
-</h1>
+<p align="center">
+  <img src="docs/assets/banner.png" width="100%" alt="Ghost: private AI that lives on your phone">
+</p>
 
 <p align="center">
-  <b>A private AI chat that runs entirely on your phone.</b><br>
-  No internet permission, no account, no server. Your conversations never leave the device.
+  Chat with Gemma 4 completely offline. No internet permission, no account, no server:<br>
+  your conversations never leave the device.
 </p>
 
 <p align="center">
@@ -119,6 +119,7 @@ The engine, the context restore, the self-tuning and the measured speeds are des
 - [LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) on-device inference runtime
 - [pdfbox-android](https://github.com/TomRoush/PdfBox-Android) for reading PDF files
 - [JetBrains Mono](https://www.jetbrains.com/lp/mono/) font, licensed under the [SIL Open Font License](docs/licenses/JetBrainsMono-OFL.txt)
+- Built together with [Claude Code](https://claude.com/claude-code) by Anthropic
 
 ## License
 
