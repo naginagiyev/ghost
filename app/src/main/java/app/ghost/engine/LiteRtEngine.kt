@@ -62,7 +62,6 @@ class LiteRtEngine(
     private var backendName = ""
     private var speculative = false
     private var contextTokens = Config.CONTEXT_TOKENS
-    private var loadMs = 0L
     private var devicePrinted = false
     @Volatile private var conversation: Conversation? = null
     @Volatile private var background: Conversation? = null
@@ -214,9 +213,7 @@ class LiteRtEngine(
                 val stats = GenStats(
                     tokens = tokens,
                     promptTokens = bench?.lastPrefillTokenCount ?: 0,
-                    ttftMs = ttft,
                     totalMs = end - start,
-                    prefillTokensPerSecond = bench?.lastPrefillTokensPerSecond ?: 0.0,
                     decodeTokensPerSecond = bench?.lastDecodeTokensPerSecond?.takeIf { it > 0 } ?: (tokens / decodeSeconds),
                     contextTokens = used,
                 )
@@ -397,7 +394,7 @@ class LiteRtEngine(
             contextTokens = size
             warmAnswer = false
             memoryRecorded = false
-            loadMs = SystemClock.elapsedRealtime() - start
+            val loadMs = SystemClock.elapsedRealtime() - start
             if (BuildConfig.DEBUG) Log.d(TAG, "loaded $name spec=$draft ctx=$size in $loadMs ms, pss=${Debug.getPss() shr 10} MB")
             say(Tag.OK, "model loaded in %.1fs".format(loadMs / 1000.0), "load")
             true

@@ -1,12 +1,20 @@
-*.iml
-*.litertlm
-*.apk
+# Gradle and IDE
 .gradle/
 .kotlin/
 .idea/
 .cxx/
 build/
 captures/
+*.iml
 local.properties
+
+# Release signing (never commit keys)
+keystore.properties
+*.jks
+*.keystore
+
+# Models and build outputs
 models/
-study/
+*.litertlm
+*.apk
+*.aab

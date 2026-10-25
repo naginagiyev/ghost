@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
+
+val keystoreProperties = Properties().apply {
+    val file = rootProject.file("keystore.properties")
+    if (file.exists()) file.inputStream().use(::load)
+}
+
+fun signingValue(name: String): String? = System.getenv(name) ?: keystoreProperties.getProperty(name)
 
 android {
     namespace = "app.ghost"
@@ -13,15 +22,25 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
         ndk { abiFilters += "arm64-v8a" }
+    }
+
+    signingConfigs {
+        create("release") {
+            signingValue("GHOST_KEYSTORE")?.let { storeFile = file(it) }
+            storePassword = signingValue("GHOST_KEYSTORE_PASSWORD")
+            keyAlias = signingValue("GHOST_KEY_ALIAS")
+            keyPassword = signingValue("GHOST_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            val release = signingConfigs.getByName("release")
+            signingConfig = if (release.storeFile != null) release else signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

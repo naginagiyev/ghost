@@ -29,9 +29,7 @@ data class LoadedModel(val label: String, val vision: Boolean, val contextTokens
 data class GenStats(
     val tokens: Int,
     val promptTokens: Int,
-    val ttftMs: Long,
     val totalMs: Long,
-    val prefillTokensPerSecond: Double,
     val decodeTokensPerSecond: Double,
     val contextTokens: Int,
 )
