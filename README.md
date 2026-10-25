@@ -22,8 +22,8 @@
 <p align="center">
   <img src="docs/assets/screenshot-chat.png" width="24%" alt="Chatting with Ghost">
   <img src="docs/assets/screenshot-table.png" width="24%" alt="Tables and formulas">
+  <img src="docs/assets/screenshot-lists.png" width="24%" alt="Lists and formatting">
   <img src="docs/assets/screenshot-chats.png" width="24%" alt="Chat list">
-  <img src="docs/assets/screenshot-models.png" width="24%" alt="Models screen">
 </p>
 
 ## Features
